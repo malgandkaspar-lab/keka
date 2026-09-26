@@ -494,18 +494,24 @@ export async function reviewScript(
   return { review: result.data, usage: result.usage };
 }
 
-export function reviewIssues(review: ScriptReview, hasResearch: boolean): ValidationIssue[] {
+/**
+ * Turns the AI review into QC issues. With `lenient` (a small local reviewer, whose
+ * taste scores are noisy) the subjective judgements - hook, clickbait, conclusion and
+ * suitability - are warnings; facts, grammar and policy always block.
+ */
+export function reviewIssues(review: ScriptReview, hasResearch: boolean, lenient = false): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const taste: ValidationIssue["severity"] = lenient ? "warning" : "error";
   if (!review.grammarAndSpellingOk) issues.push({ check: "grammar", severity: "error", message: "Grammar or spelling problems" });
   if (hasResearch && !review.factuallyConsistent) issues.push({ check: "facts", severity: "error", message: "Script is not consistent with the research" });
   for (const claim of review.unsupportedClaims.slice(0, 5)) {
     issues.push({ check: "facts", severity: hasResearch ? "error" : "warning", message: `Unsupported claim: ${claim}` });
   }
   if (review.inappropriateContent) issues.push({ check: "policy", severity: "error", message: "Inappropriate content" });
-  if (review.misleadingHook) issues.push({ check: "hook", severity: "error", message: "Hook is misleading clickbait" });
-  if (review.hookScore < 6) issues.push({ check: "hook", severity: "error", message: `Weak hook (${review.hookScore}/10)` });
-  if (review.conclusionScore < 5) issues.push({ check: "conclusion", severity: "error", message: `Weak conclusion (${review.conclusionScore}/10)` });
-  if (review.shortsSuitabilityScore < 6) issues.push({ check: "suitability", severity: "error", message: `Not well suited to Shorts (${review.shortsSuitabilityScore}/10)` });
+  if (review.misleadingHook) issues.push({ check: "hook", severity: taste, message: "Hook is misleading clickbait" });
+  if (review.hookScore < 6) issues.push({ check: "hook", severity: taste, message: `Weak hook (${review.hookScore}/10)` });
+  if (review.conclusionScore < 5) issues.push({ check: "conclusion", severity: taste, message: `Weak conclusion (${review.conclusionScore}/10)` });
+  if (review.shortsSuitabilityScore < 6) issues.push({ check: "suitability", severity: taste, message: `Not well suited to Shorts (${review.shortsSuitabilityScore}/10)` });
   for (const issue of review.issues.slice(0, 5)) issues.push({ check: "review", severity: "warning", message: issue });
   return issues;
 }
@@ -520,7 +526,7 @@ export async function validateDraft(
   const validation = programmaticChecks(draft, ctx);
   if (!validation.passed) return { validation };
   const { review, usage } = await reviewScript(ai, fullText(draft), ctx, signal);
-  const issues = [...validation.issues, ...reviewIssues(review, ctx.research.facts.length > 0)];
+  const issues = [...validation.issues, ...reviewIssues(review, ctx.research.facts.length > 0, Boolean(ai.prefersSimpleOutput))];
   return {
     validation: { ...validation, issues, review, passed: !issues.some((i) => i.severity === "error") },
     usage,

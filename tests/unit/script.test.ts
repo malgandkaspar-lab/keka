@@ -85,6 +85,12 @@ describe("script quality control (programmatic)", () => {
     expect(issues.filter((i) => i.severity === "error").map((i) => i.check)).toEqual(expect.arrayContaining(["facts", "hook"]));
   });
 
+  it("treats a small local reviewer's taste scores as warnings, but never factual problems", () => {
+    const review = { grammarAndSpellingOk: true, factuallyConsistent: true, unsupportedClaims: ["Built over 2,000 years."], inappropriateContent: false, misleadingHook: true, hookScore: 3, conclusionScore: 8, shortsSuitabilityScore: 8, issues: [] };
+    expect(reviewIssues(review, true).filter((i) => i.severity === "error").map((i) => i.check)).toEqual(["facts", "hook", "hook"]);
+    expect(reviewIssues(review, true, true).filter((i) => i.severity === "error").map((i) => i.check)).toEqual(["facts"]);
+  });
+
   it("splits manual text into hook, body and payoff", () => {
     const draft = draftFromManualText("Did you know this? First fact here. Second fact here. The final payoff.");
     expect(draft.sections[0]).toEqual({ type: "HOOK", text: "Did you know this?" });
