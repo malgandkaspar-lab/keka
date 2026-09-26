@@ -55,7 +55,7 @@ const envSchema = z.object({
 
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
   RENDER_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
-  LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error"]).default("info"),
+  LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]).default("info"),
 });
 
 export type Env = z.infer<typeof envSchema>;

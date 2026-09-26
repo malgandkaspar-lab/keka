@@ -118,10 +118,10 @@ export class TimeoutError extends AppError {
 
 /** Generated content failed the English-only requirement. */
 export class LanguageValidationError extends AppError {
-  constructor(field: string, reasons: string[]) {
+  constructor(field: string, reasons: string[], retryable = true) {
     super("NON_ENGLISH_CONTENT", `${field} is not English: ${reasons.join("; ")}`, {
       statusCode: 422,
-      retryable: true,
+      retryable,
       details: { field, reasons },
     });
   }
