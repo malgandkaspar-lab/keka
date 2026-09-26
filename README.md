@@ -92,6 +92,17 @@ Paid providers are optional and can be selected per user in **Settings**.
 
 ## Quick start with Docker
 
+**Easiest:** install [Docker Desktop](https://www.docker.com/products/docker-desktop) and start it. Then download this project (GitHub → **Code → Download ZIP**, then unzip, or `git clone`), open a terminal in the project folder and run one command:
+
+```bash
+./setup.sh          # macOS / Linux
+.\setup.ps1         # Windows PowerShell
+```
+
+The script creates `.env` with freshly generated secrets, asks for your free Pexels key and starts everything. Then open <http://localhost:3000>.
+
+Manual setup:
+
 ```bash
 cp .env.example .env
 # Fill in AUTH_SECRET, ENCRYPTION_KEY and the API keys (see below)
