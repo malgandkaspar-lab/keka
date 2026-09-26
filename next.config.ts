@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Server-only native / heavy packages are loaded from node_modules at runtime.
-  serverExternalPackages: ["@node-rs/argon2", "bullmq", "ioredis", "pino", "pg", "@prisma/adapter-pg", "an-array-of-english-words", "franc"],
+  serverExternalPackages: ["@node-rs/argon2", "bullmq", "ioredis", "pino", "pg", "@prisma/adapter-pg", "an-array-of-english-words", "franc", "sherpa-onnx-node"],
   async headers() {
     return [
       {

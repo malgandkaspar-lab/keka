@@ -55,6 +55,8 @@ export interface VoiceInfo {
 
 export interface TTSProvider {
   readonly name: string;
+  /** Approximate USD per 1,000 characters (0 for local engines). */
+  readonly costPer1kChars?: number;
   /** Voice setting ranges supported by this provider (used by the UI and validation). */
   readonly settingRanges: Partial<Record<keyof VoiceSettings, { min: number; max: number; default: number } | "boolean">>;
   synthesize(request: SynthesisRequest): Promise<SynthesisResult>;
@@ -70,6 +72,8 @@ export interface TranscriptionResult {
 
 export interface SpeechToTextProvider {
   readonly name: string;
+  /** Approximate USD per audio minute (0 for local engines). */
+  readonly costPerMinute?: number;
   /** Language is always forced to English where the provider supports it. */
   transcribe(audio: Buffer, filename: string, signal?: AbortSignal): Promise<TranscriptionResult>;
 }

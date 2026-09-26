@@ -28,6 +28,36 @@ You enter a topic (for example *"Why do astronauts grow taller in space?"*) or l
 
 Every step is persisted, so a failed step can be retried without repeating earlier work. Any component (script, voice, footage, subtitles, music, metadata, thumbnail) can be regenerated or edited by hand on its own.
 
+## Free mode: no API costs (default)
+
+Out of the box, Shorts Factory uses only free services and local open-source models:
+
+| Part | Free provider (default) | Optional paid alternative |
+|---|---|---|
+| Topic, research planning, script, review, visual plan, metadata | **Ollama** running an open model locally (default `qwen2.5:7b`) | Anthropic Claude |
+| Research sources | **Wikipedia** (MediaWiki API, no key) | Claude web search |
+| Voiceover | **Kokoro-82M** English (11 English voices), runs in the worker | ElevenLabs |
+| Subtitles / word timings | **NVIDIA Parakeet TDT 0.6B v2** (English), runs in the worker | ElevenLabs Scribe, OpenAI Whisper |
+| Stock footage | **Pexels** (free API key) | – |
+| Music and sound effects | Your licensed library, or royalty-free beds synthesised locally | – |
+| Publishing and analytics | **YouTube Data / Analytics API** (free, quota-limited) | – |
+
+What you need:
+1. **Ollama:** install it from <https://ollama.com>, then run `ollama pull qwen2.5:7b` once. With Docker Compose this is automatic.
+2. **A free Pexels API key** from <https://www.pexels.com/api/>.
+3. **A free Google Cloud OAuth client** for YouTube (see [YouTube OAuth](#youtube-oauth)).
+
+The voice and subtitle models (about 600 MB) download automatically from their official GitHub releases on first use and are then reused.
+
+Hardware: a 7B model needs about 8 GB of free RAM. 16 GB total RAM is recommended; a GPU makes text generation much faster. On a 4-core CPU:
+- Kokoro renders speech at about real time (30 s of narration in about 30 s).
+- Parakeet transcribes 30 s in about 1 s.
+- Ollama on CPU takes a few minutes per video (seconds with a GPU).
+
+On a machine with less RAM, use a smaller model such as `qwen2.5:3b` (**Settings → AI → Local model**). Smaller models write weaker scripts, but the automatic quality control and revision loop still enforces English, length and structure.
+
+Paid providers are optional and can be selected per user in **Settings**.
+
 **English only.** All generated content is English. The script, research, topic, title, description, hashtags, tags, subtitles, thumbnail text and voiceover transcript pass through a programmatic language validator (`src/services/language`), not just a prompt instruction. Non-English output is rejected and regenerated.
 
 ---
@@ -57,7 +87,8 @@ Every step is persisted, so a failed step can be retried without repeating earli
 | Redis | 6.2+ (7 recommended, with AOF persistence) |
 | FFmpeg / FFprobe | 6.x with `libx264`, `aac`, `libass`, `libfreetype` |
 | Fonts | DejaVu (`fonts-dejavu-core`) for subtitles and thumbnails |
-| API keys | Anthropic, ElevenLabs, Pexels; a Google Cloud OAuth client for YouTube |
+| Free mode | Ollama + a pulled model; a free Pexels key; a free Google OAuth client for YouTube |
+| Optional paid APIs | Anthropic, ElevenLabs, OpenAI (only if you select them) |
 
 ## Quick start with Docker
 
@@ -126,11 +157,15 @@ Everything is configured through environment variables (see `.env.example`). Sec
 | `AUTH_SECRET` | yes | ≥32 characters; signs OAuth state |
 | `ENCRYPTION_KEY` | yes | 32 bytes, base64; AES-256-GCM encryption of OAuth tokens |
 | `ALLOW_REGISTRATION` | no | `true` allows more accounts after the first admin |
-| `ANTHROPIC_API_KEY` | for generation | Claude API key |
+| `OLLAMA_BASE_URL` | free mode | Local Ollama server (default `http://localhost:11434`) |
+| `OLLAMA_MODEL` | no | Default local model (`qwen2.5:7b`); changeable per user |
+| `LOCAL_MODELS_DIR` | no | Where Kokoro/Parakeet models are stored (default `./storage/models`) |
+| `LOCAL_AI_THREADS` | no | CPU threads for the local voice/subtitle engines (default 4) |
+| `ANTHROPIC_API_KEY` | only if Claude is selected | Claude API key |
 | `ANTHROPIC_MODEL` | no | Default model (`claude-opus-5`); changeable per user |
-| `ELEVENLABS_API_KEY` | for voice/subtitles | ElevenLabs API key |
+| `ELEVENLABS_API_KEY` | only if ElevenLabs is selected | ElevenLabs API key |
 | `OPENAI_API_KEY` | no | Only if you choose Whisper for speech-to-text |
-| `PEXELS_API_KEY` | for footage | Pexels API key |
+| `PEXELS_API_KEY` | for footage | Pexels API key (free) |
 | `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` / `YOUTUBE_REDIRECT_URI` | for publishing | Google OAuth client |
 | `STORAGE_DRIVER` | no | `local` (default) or `s3` |
 | `STORAGE_LOCAL_DIR` | no | Local storage root (default `./storage`) |
@@ -141,7 +176,24 @@ Everything is configured through environment variables (see `.env.example`). Sec
 
 ## External services
 
-### Claude API (Anthropic)
+### Ollama (free, local)
+
+1. Install Ollama from <https://ollama.com> (macOS, Windows, Linux) and make sure it is running.
+2. Run `ollama pull qwen2.5:7b` once (about 4.7 GB).
+3. Keep the default `OLLAMA_BASE_URL=http://localhost:11434`. In Docker Compose the `ollama` service is used automatically.
+4. **Settings → Free local AI** shows whether Ollama is reachable and the model is installed.
+
+Other good models: `qwen2.5:14b` (better, needs about 16 GB RAM), `llama3.1:8b`, `qwen2.5:3b` (low RAM). Structured JSON output is validated with Zod; invalid output is sent back to the model for repair.
+
+### Kokoro voice and Parakeet subtitles (free, local)
+
+Both run inside the worker through `sherpa-onnx` (prebuilt for Linux, macOS and Windows). No key and no per-use cost. The models download once from the official `k2-fsa/sherpa-onnx` GitHub releases:
+- `kokoro-int8-en-v0_19` (Apache-2.0): English-only, 11 voices
+- `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8` (CC-BY-4.0): English, with timestamps
+
+Only speed is adjustable for Kokoro. Script length is calibrated automatically to each voice's measured speaking rate, so videos match the target duration.
+
+### Claude API (Anthropic, optional, paid)
 
 1. Create an API key at <https://console.anthropic.com> and set `ANTHROPIC_API_KEY`.
 2. The default model is `claude-opus-5`, with adaptive thinking and structured JSON outputs validated by Zod. Research uses Claude's server-side web search tool. On Opus 5 and Fable models, server-side refusal fallbacks (`fallbacks: "default"`) are enabled.
@@ -149,7 +201,7 @@ Everything is configured through environment variables (see `.env.example`). Sec
 
 Cost: every AI call records token usage and an estimated cost (`src/config/pricing.ts`). Research results are cached for 30 days.
 
-### ElevenLabs
+### ElevenLabs (optional, paid)
 
 1. Create an API key at <https://elevenlabs.io/app/settings/api-keys> and set `ELEVENLABS_API_KEY`.
 2. The key is used for **text-to-speech** (with character timestamps) and **Scribe speech-to-text** (language forced to English, word timestamps) for subtitles.
@@ -242,7 +294,7 @@ The render engine (`src/services/video/render-engine.ts`):
 ## Testing
 
 ```bash
-npm test                  # 84 unit + integration tests
+npm test                  # unit + integration tests
 npm run test:unit
 npm run test:integration  # needs PostgreSQL, Redis and FFmpeg
 npm run test:e2e          # Playwright; start the app + worker first

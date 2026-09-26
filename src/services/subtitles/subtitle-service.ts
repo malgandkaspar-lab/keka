@@ -79,7 +79,7 @@ export async function transcribeVoiceover(input: SubtitleGenerationInput): Promi
         transcript: transcript.text,
         detectedLanguage: transcript.language ?? "en",
         provider: input.stt.name,
-        costUsd: (input.voiceoverDurationSec / 60) * STT_COST_PER_MINUTE,
+        costUsd: (input.voiceoverDurationSec / 60) * (input.stt.costPerMinute ?? STT_COST_PER_MINUTE),
         wer,
       };
     } catch (error) {

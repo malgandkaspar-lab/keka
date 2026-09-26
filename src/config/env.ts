@@ -32,6 +32,12 @@ const envSchema = z.object({
   OPENAI_API_KEY: optionalString,
   PEXELS_API_KEY: optionalString,
 
+  // Free local AI (no API costs)
+  OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
+  OLLAMA_MODEL: z.string().default("qwen2.5:7b"),
+  LOCAL_MODELS_DIR: z.string().default("./storage/models"),
+  LOCAL_AI_THREADS: z.coerce.number().int().min(1).max(64).default(4),
+
   YOUTUBE_CLIENT_ID: optionalString,
   YOUTUBE_CLIENT_SECRET: optionalString,
   YOUTUBE_REDIRECT_URI: optionalString,

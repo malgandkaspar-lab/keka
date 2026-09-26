@@ -1,5 +1,6 @@
 /**
- * Real-world end-to-end validation (uses the REAL configured providers - costs money).
+ * Real-world end-to-end validation with the REAL configured providers
+ * (free local providers by default; paid APIs only if selected in Settings).
  *
  *   npm run e2e:real -- --email you@example.com [--topic "Why do astronauts grow taller in space?"] [--upload]
  *
@@ -21,6 +22,8 @@ import { validateBundle } from "@/services/language/language-service";
 import { materialize } from "@/services/storage";
 import { mediaInfo } from "@/services/video/ffmpeg";
 import { createVideo } from "@/services/videos/video-service";
+import { getUserSettings } from "@/services/settings/settings-service";
+import { localAiStatus } from "@/services/local-ai/status";
 
 function arg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
@@ -28,22 +31,31 @@ function arg(name: string): string | undefined {
 }
 
 async function main(): Promise<number> {
-  const creds = credentialStatus();
-  const missing = [
-    !creds.anthropic && "ANTHROPIC_API_KEY",
-    !creds.elevenlabs && "ELEVENLABS_API_KEY",
-    !creds.pexels && "PEXELS_API_KEY",
-  ].filter(Boolean);
-  if (missing.length) {
-    console.error(`Missing credentials: ${missing.join(", ")}. Set them in .env to run the real end-to-end test.`);
-    return 2;
-  }
   const email = arg("email");
   const user = email ? await db.user.findUnique({ where: { email } }) : await db.user.findFirst({ where: { role: "ADMIN" }, orderBy: { createdAt: "asc" } });
   if (!user) {
     console.error("No user found. Register in the web app first, or pass --email.");
     return 2;
   }
+  const settings = await getUserSettings(user.id);
+  const creds = credentialStatus();
+  const missing = [
+    settings.aiProvider === "anthropic" && !creds.anthropic && "ANTHROPIC_API_KEY",
+    (settings.ttsProvider === "elevenlabs" || settings.sttProvider === "elevenlabs") && !creds.elevenlabs && "ELEVENLABS_API_KEY",
+    !creds.pexels && "PEXELS_API_KEY (free at https://www.pexels.com/api/)",
+  ].filter(Boolean);
+  if (missing.length) {
+    console.error(`Missing credentials: ${missing.join(", ")}. Set them in .env to run the real end-to-end test.`);
+    return 2;
+  }
+  if (settings.aiProvider === "ollama") {
+    const status = await localAiStatus(settings.ollamaModel);
+    if (!status.ollama.reachable || !status.ollama.modelInstalled) {
+      console.error(`Ollama is not ready at ${status.ollama.baseUrl}: ${status.ollama.reachable ? `run "ollama pull ${settings.ollamaModel}"` : "install and start Ollama (https://ollama.com)"}.`);
+      return 2;
+    }
+  }
+  console.log(`Providers: text=${settings.aiProvider}, voice=${settings.ttsProvider}, subtitles=${settings.sttProvider} (free local engines cost $0)`);
   const upload = process.argv.includes("--upload");
   const account = upload ? await db.youTubeAccount.findFirst({ where: { userId: user.id, status: "ACTIVE" } }) : null;
   if (upload && !account) console.warn("No connected YouTube channel - skipping the upload step.");

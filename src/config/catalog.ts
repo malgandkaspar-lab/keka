@@ -36,6 +36,31 @@ export interface VoiceSeed {
   styles: string[];
 }
 
+/** Kokoro v0.19 English voices: speaker id (sid) inside the model, verified by pitch. */
+export const KOKORO_VOICES: { voiceId: string; sid: number; name: string; gender: string; accent: string; styles: string[]; description: string }[] = [
+  { voiceId: "af", sid: 0, name: "Kokoro Default (US female)", gender: "female", accent: "american", styles: ["conversational"], description: "Balanced American female" },
+  { voiceId: "af_bella", sid: 1, name: "Bella", gender: "female", accent: "american", styles: ["energetic", "conversational"], description: "Warm, lively American female" },
+  { voiceId: "af_nicole", sid: 2, name: "Nicole", gender: "female", accent: "american", styles: ["calm"], description: "Soft, calm American female" },
+  { voiceId: "af_sarah", sid: 3, name: "Sarah (Kokoro)", gender: "female", accent: "american", styles: ["documentary", "conversational"], description: "Clear American female" },
+  { voiceId: "af_sky", sid: 4, name: "Sky", gender: "female", accent: "american", styles: ["energetic"], description: "Bright American female" },
+  { voiceId: "am_adam", sid: 5, name: "Adam", gender: "male", accent: "american", styles: ["documentary", "cinematic"], description: "Deep American male narrator" },
+  { voiceId: "am_michael", sid: 6, name: "Michael", gender: "male", accent: "american", styles: ["conversational", "documentary"], description: "Friendly American male" },
+  { voiceId: "bf_emma", sid: 7, name: "Emma", gender: "female", accent: "british", styles: ["documentary", "calm"], description: "Elegant British female" },
+  { voiceId: "bf_isabella", sid: 8, name: "Isabella", gender: "female", accent: "british", styles: ["cinematic"], description: "Expressive British female" },
+  { voiceId: "bm_george", sid: 9, name: "George (Kokoro)", gender: "male", accent: "british", styles: ["documentary", "cinematic"], description: "Classic British male storyteller" },
+  { voiceId: "bm_lewis", sid: 10, name: "Lewis", gender: "male", accent: "british", styles: ["calm", "documentary"], description: "Calm British male" },
+];
+
+/** Free local Kokoro voices (English only). */
+export const KOKORO_VOICE_SEEDS: VoiceSeed[] = KOKORO_VOICES.map((v) => ({
+  provider: "kokoro",
+  voiceId: v.voiceId,
+  name: v.name,
+  description: `${v.description} (free, local)`,
+  gender: v.gender,
+  styles: v.styles,
+}));
+
 /**
  * Premade ElevenLabs English voices. Use Settings → "Sync voices" to refresh the
  * catalog from the ElevenLabs API for your account.

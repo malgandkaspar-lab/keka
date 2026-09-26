@@ -6,6 +6,7 @@ import { LiveProgress } from "@/components/videos/live-progress";
 import { VideoActions } from "@/components/videos/video-actions";
 import { mediaUrl } from "@/components/videos/video-thumb";
 import { requirePageUser } from "@/lib/auth";
+import { getUserSettings } from "@/services/settings/settings-service";
 import { db } from "@/lib/db";
 import { NotFoundError } from "@/lib/errors";
 import { formatDate, formatDuration, formatUsd, isProcessing } from "@/lib/format";
@@ -32,7 +33,7 @@ export default async function VideoPage(props: PageProps<"/videos/[id]">) {
   }
   const { video, steps, logs, scenes, voiceover, subtitle, voicePreset } = details;
   const [voices, tracks, youtubeAccounts] = await Promise.all([
-    db.voicePreset.findMany({ where: { enabled: true, language: "en" }, orderBy: { name: "asc" } }),
+    db.voicePreset.findMany({ where: { enabled: true, language: "en", provider: (await getUserSettings(user.id)).ttsProvider }, orderBy: { name: "asc" } }),
     db.musicTrack.findMany({ where: { enabled: true, OR: [{ userId: user.id }, { userId: null }] }, orderBy: { title: "asc" } }),
     db.youTubeAccount.count({ where: { userId: user.id, status: "ACTIVE" } }),
   ]);
@@ -118,6 +119,7 @@ export default async function VideoPage(props: PageProps<"/videos/[id]">) {
 
           <ComponentEditor
             videoId={video.id}
+            engine={(await getUserSettings(user.id)).ttsProvider}
             voices={voices.map((v) => ({ id: v.id, name: `${v.name}${v.description ? ` – ${v.description}` : ""}` }))}
             tracks={tracks.map((t) => ({ id: t.id, title: t.title, moods: t.moods }))}
             moods={Object.keys(MOOD_PROFILES)}

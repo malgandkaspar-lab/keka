@@ -121,8 +121,10 @@ export function ComponentEditor({
   moods,
   current,
   disabled,
+  engine,
 }: {
   videoId: string;
+  engine: string;
   voices: { id: string; name: string }[];
   tracks: { id: string; title: string; moods: string[] }[];
   moods: string[];
@@ -141,13 +143,16 @@ export function ComponentEditor({
     const body: Record<string, unknown> = {};
     if (kind === "voice") {
       body.voicePresetId = form.get("voice");
-      body.voiceSettings = {
-        speed: Number(form.get("speed")),
-        stability: Number(form.get("stability")),
-        similarityBoost: Number(form.get("similarityBoost")),
-        style: Number(form.get("style")),
-        useSpeakerBoost: form.get("useSpeakerBoost") === "on",
-      };
+      body.voiceSettings =
+        engine === "elevenlabs"
+          ? {
+              speed: Number(form.get("speed")),
+              stability: Number(form.get("stability")),
+              similarityBoost: Number(form.get("similarityBoost")),
+              style: Number(form.get("style")),
+              useSpeakerBoost: form.get("useSpeakerBoost") === "on",
+            }
+          : { speed: Number(form.get("speed")) };
     } else if (kind === "music") {
       const choice = String(form.get("music"));
       if (choice.startsWith("track:")) body.musicTrackId = choice.slice(6);
@@ -184,6 +189,7 @@ export function ComponentEditor({
             <Label htmlFor="speed" hint="0.7-1.2">Speed</Label>
             <Input id="speed" name="speed" type="number" step="0.05" min={0.7} max={1.2} defaultValue={current.voice.speed} disabled={disabled} />
           </div>
+          {engine === "elevenlabs" && (<>
           <div>
             <Label htmlFor="stability" hint="0-1">Stability</Label>
             <Input id="stability" name="stability" type="number" step="0.05" min={0} max={1} defaultValue={current.voice.stability} disabled={disabled} />
@@ -196,9 +202,10 @@ export function ComponentEditor({
             <Label htmlFor="style" hint="0-1">Style</Label>
             <Input id="style" name="style" type="number" step="0.05" min={0} max={1} defaultValue={current.voice.style} disabled={disabled} />
           </div>
+          </>)}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 text-sm">
+          <label className={`flex items-center gap-2 text-sm ${engine === "elevenlabs" ? "" : "invisible"}`}>
             <input type="checkbox" name="useSpeakerBoost" defaultChecked={current.voice.useSpeakerBoost} className="accent-indigo-500" disabled={disabled} /> Speaker boost
           </label>
           <Button type="submit" variant="secondary" disabled={disabled || !!busy}>

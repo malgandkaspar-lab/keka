@@ -10,7 +10,9 @@ import { analyzeLanguage } from "@/services/language/language-service";
 import { storeAsset } from "@/services/media/media-service";
 import { mediaInfo } from "@/services/video/ffmpeg";
 import { charactersToWords } from "./alignment";
-import type { TTSProvider, VoiceSettings, WordTiming } from "./types";
+import { alignScriptToTranscript } from "@/services/subtitles/cues";
+import { createLogger } from "@/lib/logger";
+import type { SpeechToTextProvider, TTSProvider, VoiceSettings, WordTiming } from "./types";
 
 /**
  * VoiceoverService
@@ -34,6 +36,8 @@ export interface VoiceoverOptions {
   settings: VoiceSettings;
   targetDurationSec: number;
   provider: TTSProvider;
+  /** Used to obtain word timings when the TTS engine does not return them. */
+  stt?: SpeechToTextProvider | null;
   signal?: AbortSignal;
 }
 
@@ -45,16 +49,33 @@ export interface VoiceoverResult {
 }
 
 const MAX_SPEED = 1.15;
+const MIN_SPEED = 0.88;
+const log = createLogger({ module: "voiceover" });
 
 export function voiceCacheKey(text: string, voiceId: string, modelId: string, settings: VoiceSettings): string {
   return stableHash({ text, voiceId, modelId, settings, v: 1 });
 }
 
-export async function resolveVoice(voicePresetId: string | null | undefined): Promise<VoicePreset> {
-  const voice = voicePresetId
-    ? await db.voicePreset.findUnique({ where: { id: voicePresetId } })
-    : await db.voicePreset.findFirst({ where: { enabled: true, language: "en" }, orderBy: { createdAt: "asc" } });
-  if (!voice) throw new NotFoundError("English voice preset", voicePresetId ?? "default");
+/**
+ * Resolves the English voice to use for a TTS provider. A preset belonging to another
+ * provider (e.g. an ElevenLabs voice while the free Kokoro engine is selected) falls
+ * back to the provider's first voice with a similar gender.
+ */
+export async function resolveVoice(voicePresetId: string | null | undefined, provider?: string): Promise<VoicePreset> {
+  const requested = voicePresetId ? await db.voicePreset.findUnique({ where: { id: voicePresetId } }) : null;
+  let voice = requested && (!provider || requested.provider === provider) ? requested : null;
+  if (!voice) {
+    const candidates = await db.voicePreset.findMany({
+      where: { enabled: true, language: "en", ...(provider ? { provider } : {}) },
+      orderBy: { createdAt: "asc" },
+    });
+    voice = candidates.find((c) => requested?.gender && c.gender === requested.gender) ?? candidates[0] ?? null;
+    // A provider without a voice catalogue (e.g. a custom engine) accepts any English preset.
+    if (!voice && candidates.length === 0) {
+      voice = requested ?? (await db.voicePreset.findFirst({ where: { enabled: true, language: "en" }, orderBy: { createdAt: "asc" } }));
+    }
+  }
+  if (!voice) throw new NotFoundError(`English voice for ${provider ?? "the TTS provider"}`, voicePresetId ?? "default");
   if (voice.language !== "en") throw new LanguageValidationError("voice", [`voice "${voice.name}" is not an English voice`]);
   return voice;
 }
@@ -81,18 +102,27 @@ async function synthesizeAndStore(opts: VoiceoverOptions, settings: VoiceSetting
     kind: "AUDIO_VOICE",
     key: `voice/${cacheKey}.${result.extension}`,
     mimeType: result.mimeType,
-    source: "ELEVENLABS",
+    source: opts.provider.name === "elevenlabs" ? "ELEVENLABS" : "GENERATED",
     filePath: localPath,
     probe: true,
     author: opts.provider.name,
     license: "Generated with the account's TTS provider plan",
     metadata: { voiceId: opts.voice.voiceId, modelId: opts.modelId },
   });
-  const words = result.alignment ? charactersToWords(result.alignment) : [];
+  let words = result.alignment ? charactersToWords(result.alignment) : [];
+  if (words.length === 0 && opts.stt) {
+    // No engine timestamps: recognise the generated audio to get exact word timings.
+    try {
+      const transcript = await opts.stt.transcribe(result.audio, `voice.${result.extension}`, opts.signal);
+      words = alignScriptToTranscript(text, transcript.words);
+    } catch (error) {
+      log.warn({ err: (error as Error).message }, "could not derive word timings from the voiceover");
+    }
+  }
   return {
     cacheKey,
     existing: null,
-    costUsd: (result.characters / 1000) * TTS_COST_PER_1K_CHARS,
+    costUsd: (result.characters / 1000) * (opts.provider.costPer1kChars ?? TTS_COST_PER_1K_CHARS),
     created: { asset, durationSec: info.durationSec, words, alignment: result.alignment },
   };
 }
@@ -115,6 +145,14 @@ export async function generateVoiceover(opts: VoiceoverOptions): Promise<Voiceov
       settings = { ...settings, speed };
       attempt = await synthesizeAndStore(opts, settings, workDir);
       totalCost += attempt.costUsd;
+    } else if (duration < opts.targetDurationSec * 0.82 && currentSpeed > MIN_SPEED) {
+      // Narration came out much shorter than planned: slow down slightly (stays natural).
+      const speed = Number(Math.max(MIN_SPEED, currentSpeed * (duration / (opts.targetDurationSec * 0.92))).toFixed(2));
+      if (speed < currentSpeed - 0.02) {
+        settings = { ...settings, speed };
+        attempt = await synthesizeAndStore(opts, settings, workDir);
+        totalCost += attempt.costUsd;
+      }
     }
 
     await db.voiceover.updateMany({ where: { videoId: opts.videoId, isCurrent: true }, data: { isCurrent: false } });

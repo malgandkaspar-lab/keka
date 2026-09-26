@@ -12,7 +12,7 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation ca-certificates openssl tini \
+ && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fonts-liberation ca-certificates openssl tini bzip2 \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
@@ -33,6 +33,7 @@ ENV NODE_ENV=production \
     FFPROBE_PATH=ffprobe \
     FONTS_DIR=/usr/share/fonts/truetype \
     STORAGE_LOCAL_DIR=/app/storage \
+    LOCAL_MODELS_DIR=/app/storage/models \
     WORK_DIR=/app/storage/tmp
 RUN groupadd --system app && useradd --system --gid app --home /app app
 COPY --from=build --chown=app:app /app/package.json /app/package-lock.json /app/tsconfig.json /app/next.config.ts /app/prisma.config.ts ./

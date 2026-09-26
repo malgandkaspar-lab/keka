@@ -1,4 +1,5 @@
-import { IntegrationStatus, MusicLibrary, SettingsForm, VoiceSync } from "@/components/forms/settings-form";
+import { IntegrationStatus, LocalAiStatusCard, MusicLibrary, SettingsForm, VoiceSync } from "@/components/forms/settings-form";
+import { localAiStatus } from "@/services/local-ai/status";
 import { SubtitleStyleEditor } from "@/components/forms/subtitle-style-editor";
 import { listCustomSubtitleStyles, SUBTITLE_FONTS } from "@/services/subtitles/style-service";
 import { PageHeader } from "@/components/ui/primitives";
@@ -17,7 +18,7 @@ export default async function SettingsPage() {
   const [settings, categories, voices, templates, tracks, customStyles] = await Promise.all([
     getUserSettings(user.id),
     db.topicCategory.findMany({ where: { enabled: true }, orderBy: { sortOrder: "asc" } }),
-    db.voicePreset.findMany({ where: { enabled: true, language: "en" }, orderBy: { name: "asc" } }),
+    db.voicePreset.findMany({ where: { enabled: true, language: "en" }, orderBy: [{ provider: "desc" }, { name: "asc" }] }),
     db.generationTemplate.findMany({ where: { enabled: true } }),
     db.musicTrack.findMany({ where: { OR: [{ userId: user.id }, { userId: null }] }, orderBy: { createdAt: "desc" } }),
     listCustomSubtitleStyles(user.id),
@@ -32,7 +33,7 @@ export default async function SettingsPage() {
           settings={settings}
           options={{
             categories: categories.map((c) => ({ key: c.key, name: c.name })),
-            voices: voices.map((v) => ({ id: v.id, name: v.name })),
+            voices: voices.map((v) => ({ id: v.id, name: `${v.name} (${v.provider === "kokoro" ? "Kokoro, free" : "ElevenLabs"})` })),
             templates: templates.map((t) => ({ key: t.key, name: t.name })),
             subtitleStyles: [...Object.values(SUBTITLE_STYLE_PRESETS), ...customStyles].map((s) => ({ key: s.key, name: s.name })),
             moods: Object.keys(MOOD_PROFILES),
@@ -42,6 +43,7 @@ export default async function SettingsPage() {
         <SubtitleStyleEditor fonts={SUBTITLE_FONTS} custom={customStyles} base={SUBTITLE_STYLE_PRESETS.fast_viral!} />
         </div>
         <div className="space-y-6">
+          <LocalAiStatusCard status={await localAiStatus(settings.ollamaModel)} />
           <IntegrationStatus status={credentialStatus()} />
           <VoiceSync count={voices.length} />
           <MusicLibrary

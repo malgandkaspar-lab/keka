@@ -1,6 +1,7 @@
 import { ScheduleForm, ScheduleList } from "@/components/forms/schedule-form";
 import { Alert, Card, CardTitle, EmptyState, PageHeader } from "@/components/ui/primitives";
 import { requirePageUser } from "@/lib/auth";
+import { getUserSettings } from "@/services/settings/settings-service";
 import { db } from "@/lib/db";
 
 export const metadata = { title: "Schedules" };
@@ -10,7 +11,7 @@ export default async function SchedulesPage() {
   const [schedules, categories, voices, templates, youtube] = await Promise.all([
     db.schedule.findMany({ where: { userId: user.id }, orderBy: { createdAt: "asc" }, include: { template: { select: { key: true } }, _count: { select: { videos: true } } } }),
     db.topicCategory.findMany({ where: { enabled: true }, orderBy: { sortOrder: "asc" } }),
-    db.voicePreset.findMany({ where: { enabled: true, language: "en" }, orderBy: { name: "asc" } }),
+    db.voicePreset.findMany({ where: { enabled: true, language: "en", provider: (await getUserSettings(user.id)).ttsProvider }, orderBy: { name: "asc" } }),
     db.generationTemplate.findMany({ where: { enabled: true } }),
     db.youTubeAccount.count({ where: { userId: user.id, status: "ACTIVE" } }),
   ]);

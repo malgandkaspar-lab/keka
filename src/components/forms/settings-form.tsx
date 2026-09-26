@@ -44,7 +44,10 @@ export function SettingsForm({ settings, options }: { settings: UserSettings; op
       dailyGenerationLimit: num("dailyGenerationLimit"),
       monthlyGenerationLimit: num("monthlyGenerationLimit"),
       monthlyBudgetUsd: num("monthlyBudgetUsd"),
+      aiProvider: f.get("aiProvider") as UserSettings["aiProvider"],
       aiModel: String(f.get("aiModel")),
+      ollamaModel: String(f.get("ollamaModel") || "qwen2.5:7b"),
+      ttsProvider: f.get("ttsProvider") as UserSettings["ttsProvider"],
       aiEffort: f.get("aiEffort") as UserSettings["aiEffort"],
       ttsModelId: String(f.get("ttsModelId")),
       sttProvider: f.get("sttProvider") as UserSettings["sttProvider"],
@@ -167,11 +170,15 @@ export function SettingsForm({ settings, options }: { settings: UserSettings; op
         <CardTitle>AI, voice & audio</CardTitle>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="AI provider">
-            <Select name="aiProvider" defaultValue={settings.aiProvider} disabled>
-              <option value="anthropic">Anthropic Claude</option>
+            <Select name="aiProvider" defaultValue={settings.aiProvider}>
+              <option value="ollama">Ollama – free, local (no API costs)</option>
+              <option value="anthropic">Anthropic Claude – paid API</option>
             </Select>
           </Field>
-          <Field label="AI model">
+          <Field label="Local model (Ollama)" hint="e.g. qwen2.5:7b">
+            <Input name="ollamaModel" defaultValue={settings.ollamaModel} />
+          </Field>
+          <Field label="Claude model (if Claude is selected)">
             <Select name="aiModel" defaultValue={settings.aiModel}>
               {[...new Set([settings.aiModel, ...options.aiModels])].map((m) => (
                 <option key={m} value={m}>
@@ -180,14 +187,20 @@ export function SettingsForm({ settings, options }: { settings: UserSettings; op
               ))}
             </Select>
           </Field>
-          <Field label="AI effort">
+          <Field label="AI effort (Claude)">
             <Select name="aiEffort" defaultValue={settings.aiEffort}>
               <option value="low">Low (cheapest)</option>
               <option value="medium">Medium</option>
               <option value="high">High (best quality)</option>
             </Select>
           </Field>
-          <Field label="ElevenLabs model">
+          <Field label="Voice engine">
+            <Select name="ttsProvider" defaultValue={settings.ttsProvider}>
+              <option value="kokoro">Kokoro – free, local</option>
+              <option value="elevenlabs">ElevenLabs – paid API</option>
+            </Select>
+          </Field>
+          <Field label="ElevenLabs model (if ElevenLabs is selected)">
             <Select name="ttsModelId" defaultValue={settings.ttsModelId}>
               <option value="eleven_multilingual_v2">eleven_multilingual_v2 (highest quality)</option>
               <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 (fast, English enforced)</option>
@@ -196,8 +209,9 @@ export function SettingsForm({ settings, options }: { settings: UserSettings; op
           </Field>
           <Field label="Speech-to-text">
             <Select name="sttProvider" defaultValue={settings.sttProvider}>
-              <option value="elevenlabs">ElevenLabs Scribe</option>
-              <option value="openai">OpenAI Whisper</option>
+              <option value="parakeet">Parakeet – free, local</option>
+              <option value="elevenlabs">ElevenLabs Scribe – paid API</option>
+              <option value="openai">OpenAI Whisper – paid API</option>
             </Select>
           </Field>
           <Field label="Speaking rate (words/min)">
@@ -230,11 +244,11 @@ export function SettingsForm({ settings, options }: { settings: UserSettings; op
 
 export function IntegrationStatus({ status }: { status: Record<string, boolean> }) {
   const labels: Record<string, [string, string]> = {
-    anthropic: ["Anthropic Claude", "ANTHROPIC_API_KEY"],
-    elevenlabs: ["ElevenLabs (voice + subtitles)", "ELEVENLABS_API_KEY"],
-    openaiWhisper: ["OpenAI Whisper (optional)", "OPENAI_API_KEY"],
-    pexels: ["Pexels stock footage", "PEXELS_API_KEY"],
-    youtube: ["YouTube OAuth", "YOUTUBE_CLIENT_ID / SECRET / REDIRECT_URI"],
+    pexels: ["Pexels stock footage (free key)", "PEXELS_API_KEY"],
+    anthropic: ["Anthropic Claude (optional, paid)", "ANTHROPIC_API_KEY"],
+    elevenlabs: ["ElevenLabs (optional, paid)", "ELEVENLABS_API_KEY"],
+    openaiWhisper: ["OpenAI Whisper (optional, paid)", "OPENAI_API_KEY"],
+    youtube: ["YouTube OAuth (free)", "YOUTUBE_CLIENT_ID / SECRET / REDIRECT_URI"],
     s3: ["S3 storage (production)", "STORAGE_* variables"],
   };
   return (
@@ -337,6 +351,42 @@ export function MusicLibrary({ tracks, moods }: { tracks: { id: string; title: s
           {busy === "upload" ? "Uploading..." : "Upload track"}
         </Button>
       </form>
+    </Card>
+  );
+}
+
+export function LocalAiStatusCard({ status }: { status: import("@/services/local-ai/status").LocalAiStatus }) {
+  const o = status.ollama;
+  return (
+    <Card>
+      <CardTitle>Free local AI</CardTitle>
+      <ul className="space-y-2 text-sm">
+        <li className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-zinc-200">Ollama (text)</p>
+            <p className="font-mono text-xs text-zinc-500">{o.baseUrl}</p>
+          </div>
+          <Badge tone={o.reachable ? (o.modelInstalled ? "success" : "warning") : "danger"}>{o.reachable ? (o.modelInstalled ? "ready" : "model missing") : "not running"}</Badge>
+        </li>
+        <li className="flex items-center justify-between gap-3">
+          <p className="text-zinc-200">Kokoro voice (~100 MB)</p>
+          <Badge tone={status.kokoroInstalled ? "success" : "info"}>{status.kokoroInstalled ? "installed" : "downloads on first use"}</Badge>
+        </li>
+        <li className="flex items-center justify-between gap-3">
+          <p className="text-zinc-200">Parakeet subtitles (~480 MB)</p>
+          <Badge tone={status.parakeetInstalled ? "success" : "info"}>{status.parakeetInstalled ? "installed" : "downloads on first use"}</Badge>
+        </li>
+      </ul>
+      {!o.reachable && (
+        <p className="mt-3 text-xs text-zinc-400">
+          Install Ollama from ollama.com, start it, then run <code className="text-zinc-200">ollama pull {o.model}</code>.
+        </p>
+      )}
+      {o.reachable && !o.modelInstalled && (
+        <p className="mt-3 text-xs text-zinc-400">
+          Run <code className="text-zinc-200">ollama pull {o.model}</code> once to download the model.
+        </p>
+      )}
     </Card>
   );
 }

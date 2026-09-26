@@ -5,6 +5,7 @@ import { requirePageUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { MOOD_PROFILES } from "@/services/music/procedural";
 import { getUserSettings } from "@/services/settings/settings-service";
+import { localAiStatus } from "@/services/local-ai/status";
 
 export const metadata = { title: "Generate" };
 
@@ -13,16 +14,22 @@ export default async function GeneratePage() {
   const settings = await getUserSettings(user.id);
   const [categories, voices, templates, youtubeAccounts] = await Promise.all([
     db.topicCategory.findMany({ where: { enabled: true }, orderBy: { sortOrder: "asc" } }),
-    db.voicePreset.findMany({ where: { enabled: true, language: "en" }, orderBy: { name: "asc" } }),
+    db.voicePreset.findMany({ where: { enabled: true, language: "en", provider: settings.ttsProvider }, orderBy: { name: "asc" } }),
     db.generationTemplate.findMany({ where: { enabled: true }, orderBy: { createdAt: "asc" } }),
     db.youTubeAccount.count({ where: { userId: user.id, status: "ACTIVE" } }),
   ]);
   const creds = credentialStatus();
   const missing = [
-    !creds.anthropic && "ANTHROPIC_API_KEY",
-    !creds.elevenlabs && "ELEVENLABS_API_KEY",
-    !creds.pexels && "PEXELS_API_KEY",
+    settings.aiProvider === "anthropic" && !creds.anthropic && "ANTHROPIC_API_KEY",
+    (settings.ttsProvider === "elevenlabs" || settings.sttProvider === "elevenlabs") && !creds.elevenlabs && "ELEVENLABS_API_KEY",
+    settings.sttProvider === "openai" && !creds.openaiWhisper && "OPENAI_API_KEY",
+    !creds.pexels && "PEXELS_API_KEY (free at pexels.com/api)",
   ].filter((v): v is string => Boolean(v));
+  if (settings.aiProvider === "ollama") {
+    const local = await localAiStatus(settings.ollamaModel);
+    if (!local.ollama.reachable) missing.push(`Ollama is not running at ${local.ollama.baseUrl} (install from ollama.com)`);
+    else if (!local.ollama.modelInstalled) missing.push(`Ollama model not installed (run: ollama pull ${settings.ollamaModel})`);
+  }
 
   return (
     <>

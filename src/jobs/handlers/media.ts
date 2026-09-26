@@ -20,8 +20,14 @@ export const generateVoiceHandler: StepHandler = async (ctx) => {
   const { video, settings } = await loadVideoContext(ctx.videoId);
   const version = await currentScriptVersion(video.id);
   if (version.status !== "VALID") throw new ValidationError("The current script has not passed validation");
-  const voice = await resolveVoice(video.voicePresetId ?? settings.defaultVoicePresetId);
   const provider = getTTSProvider(settings);
+  const voice = await resolveVoice(video.voicePresetId ?? settings.defaultVoicePresetId, provider.name);
+  let stt = null;
+  try {
+    stt = getSTTProvider(settings);
+  } catch (error) {
+    if (!(error instanceof MissingCredentialError)) throw error;
+  }
   const voiceSettings: VoiceSettings = {
     ...((voice.settings ?? {}) as VoiceSettings),
     ...((video.voiceSettings ?? {}) as VoiceSettings),
@@ -36,6 +42,7 @@ export const generateVoiceHandler: StepHandler = async (ctx) => {
     settings: voiceSettings,
     targetDurationSec: video.targetDurationSec,
     provider,
+    stt,
     signal: ctx.signal,
   });
   return {

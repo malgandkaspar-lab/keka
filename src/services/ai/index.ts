@@ -1,6 +1,7 @@
 import { getEnv, requireCredential } from "@/config/env";
 import type { UserSettings } from "@/services/settings/schema";
 import { AnthropicProvider } from "./anthropic-provider";
+import { OllamaProvider } from "./ollama-provider";
 import type { AIProvider } from "./types";
 
 /**
@@ -9,9 +10,11 @@ import type { AIProvider } from "./types";
  */
 let override: AIProvider | undefined;
 
-export function getAIProvider(settings: Pick<UserSettings, "aiProvider" | "aiModel">): AIProvider {
+export function getAIProvider(settings: Pick<UserSettings, "aiProvider" | "aiModel" | "ollamaModel">): AIProvider {
   if (override) return override;
   switch (settings.aiProvider) {
+    case "ollama":
+      return new OllamaProvider(settings.ollamaModel || getEnv().OLLAMA_MODEL, getEnv().OLLAMA_BASE_URL);
     case "anthropic":
       return new AnthropicProvider({
         apiKey: requireCredential("ANTHROPIC_API_KEY"),

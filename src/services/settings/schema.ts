@@ -22,13 +22,17 @@ export const userSettingsSchema = z.object({
   monthlyGenerationLimit: z.number().int().min(0).max(10000).default(200),
   monthlyBudgetUsd: z.number().min(0).max(100000).default(100),
 
-  aiProvider: z.enum(["anthropic"]).default("anthropic"),
+  /** "ollama" = free local AI (default, no API costs); "anthropic" = Claude API (paid). */
+  aiProvider: z.enum(["ollama", "anthropic"]).default("ollama"),
   aiModel: z.string().default("claude-opus-5"),
+  ollamaModel: z.string().min(1).default("qwen2.5:7b"),
   aiEffort: z.enum(["low", "medium", "high"]).default("medium"),
 
-  ttsProvider: z.enum(["elevenlabs"]).default("elevenlabs"),
+  /** "kokoro" = free local voice (default); "elevenlabs" = paid API. */
+  ttsProvider: z.enum(["kokoro", "elevenlabs"]).default("kokoro"),
   ttsModelId: z.string().default("eleven_multilingual_v2"),
-  sttProvider: z.enum(["elevenlabs", "openai"]).default("elevenlabs"),
+  /** "parakeet" = free local speech recognition (default); others are paid APIs. */
+  sttProvider: z.enum(["parakeet", "elevenlabs", "openai"]).default("parakeet"),
   wordsPerMinute: z.number().int().min(100).max(240).default(165),
   durationTolerancePct: z.number().min(0.03).max(0.4).default(0.12),
 

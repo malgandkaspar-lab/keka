@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { countSpokenWords, estimateSpeechDurationSec, isWithinDuration, targetWordCount } from "@/services/scripts/duration";
 import { draftFromManualText, fullText, programmaticChecks, reviewIssues, type ScriptDraft } from "@/services/scripts/script-service";
 import { ASTRONAUT_SCRIPT } from "../helpers/fakes";
+import { impliedWordsPerMinute } from "@/services/tts/speech-rate";
 
 const ctx = { targetDurationSec: 30, wordsPerMinute: 165, tolerancePct: 0.12, recentHooks: [] };
 
@@ -88,5 +89,15 @@ describe("script quality control (programmatic)", () => {
     expect(draft.sections[0]).toEqual({ type: "HOOK", text: "Did you know this?" });
     expect(draft.sections.at(-1)!.type).toBe("PAYOFF");
     expect(fullText(draft)).toBe("Did you know this? First fact here. Second fact here. The final payoff.");
+  });
+});
+
+describe("speaking-rate calibration", () => {
+  it("recovers the words-per-minute that reproduces a measured duration", () => {
+    const text = fullText(ASTRONAUT_SCRIPT);
+    const wpm = impliedWordsPerMinute(text, 20.8)!;
+    expect(wpm).toBeGreaterThan(190);
+    expect(estimateSpeechDurationSec(text, wpm)).toBeCloseTo(20.6, 0);
+    expect(impliedWordsPerMinute("Too short.", 3)).toBeNull();
   });
 });

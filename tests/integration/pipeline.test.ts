@@ -21,6 +21,12 @@ import { collectAnalyticsForUser } from "@/services/analytics/analytics-service"
 import { createTestUser, resetDatabase } from "../helpers/db";
 import { ASTRONAUT_SCRIPT, FakeAIProvider, FakeSTTProvider, FakeTTSProvider, FakeVideoProvider, FakeYouTubeProvider } from "../helpers/fakes";
 import { fullText } from "@/services/scripts/script-service";
+import { KokoroTTSProvider } from "@/services/tts/kokoro";
+import { ParakeetSTTProvider } from "@/services/tts/parakeet";
+import { isModelInstalled, LOCAL_MODELS } from "@/services/local-ai/models";
+import { wordErrorRate } from "@/services/tts/alignment";
+
+const localModels = (await isModelInstalled(LOCAL_MODELS["kokoro-en"])) && (await isModelInstalled(LOCAL_MODELS["parakeet-en"]));
 
 /**
  * End-to-end pipeline test: real PostgreSQL, real BullMQ/Redis queues and workers,
@@ -233,6 +239,31 @@ describe("generation pipeline (end to end)", () => {
     expect(ready.error).toBeNull();
     expect(ready.status).toBe("READY");
   }, 300_000);
+
+  it.runIf(localModels)("narrates and subtitles with the free local Kokoro voice and Parakeet recognition", async () => {
+    setSpeechProvidersForTesting(new KokoroTTSProvider(), new ParakeetSTTProvider());
+    try {
+      const user = await createTestUser();
+      const voice = await db.voicePreset.findFirstOrThrow({ where: { provider: "kokoro", voiceId: "am_adam" } });
+      // The fixed test script is ~68 words; Kokoro reads ~210 wpm, so it fits a 22 s target.
+      const { video } = await createVideo(user.id, { topic: "Why do astronauts grow taller in space?", category: "space", durationSec: 22, voicePresetId: voice.id, templateKey: "cinematic", autoPublish: false });
+      const ready = await waitForStatus(video.id, ["READY", "FAILED"], 600_000);
+      expect(ready.error).toBeNull();
+      expect(ready.status).toBe("READY");
+      const voiceover = await db.voiceover.findFirstOrThrow({ where: { videoId: video.id, isCurrent: true } });
+      expect(voiceover.provider).toBe("kokoro");
+      expect(voiceover.durationSec).toBeGreaterThan(15);
+      const subtitle = await db.subtitle.findFirstOrThrow({ where: { videoId: video.id, isCurrent: true } });
+      expect(subtitle.provider).toBe("parakeet");
+      expect(wordErrorRate(fullText(ASTRONAUT_SCRIPT), subtitle.transcript)).toBeLessThan(0.15);
+      const report = ready.qualityReport as { passed: boolean };
+      expect(report.passed).toBe(true);
+      const cost = await db.generationJob.aggregate({ where: { videoId: video.id, step: { in: ["GENERATE_VOICE", "GENERATE_SUBTITLES"] } }, _sum: { costUsd: true } });
+      expect(cost._sum.costUsd).toBe(0);
+    } finally {
+      setSpeechProvidersForTesting(tts, stt);
+    }
+  }, 700_000);
 
   it("stores assets through the storage abstraction", async () => {
     const storage = getStorage();

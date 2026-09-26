@@ -2,7 +2,7 @@ import "dotenv/config";
 import { pathToFileURL } from "node:url";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { BUILT_IN_CATEGORIES, DEFAULT_VOICES } from "../src/config/catalog";
+import { BUILT_IN_CATEGORIES, DEFAULT_VOICES, KOKORO_VOICE_SEEDS } from "../src/config/catalog";
 import { BUILT_IN_TEMPLATES } from "../src/config/templates";
 
 /**
@@ -24,7 +24,7 @@ export async function seed(prisma: PrismaClient): Promise<void> {
       update: { name: template.name, description: template.description, config: template.config, isBuiltIn: true },
     });
   }
-  for (const voice of DEFAULT_VOICES) {
+  for (const voice of [...KOKORO_VOICE_SEEDS, ...DEFAULT_VOICES]) {
     await prisma.voicePreset.upsert({
       where: { provider_voiceId: { provider: voice.provider, voiceId: voice.voiceId } },
       create: { ...voice, language: "en" },

@@ -21,6 +21,9 @@ import {
 import { currentSubtitle } from "@/services/subtitles/subtitle-service";
 import { generateTopic, markTopicUsed, recentTopicTitles, rejectTopic } from "@/services/topics/topic-service";
 import { loadVideoContext, type VideoContext } from "../context";
+import { calibratedWordsPerMinute } from "@/services/tts/speech-rate";
+import { resolveVoice } from "@/services/tts/voiceover-service";
+import { getTTSProvider } from "@/services/tts";
 import type { StepHandler } from "../types";
 
 /** Content steps: topic, research, script, validation, metadata and final English QA. */
@@ -92,6 +95,19 @@ export const researchTopicHandler: StepHandler = async (ctx) => {
   };
 };
 
+/** Words per minute of the voice that will read this script (learned from past voiceovers). */
+async function scriptWordsPerMinute(vc: VideoContext): Promise<number> {
+  const { video, settings } = vc;
+  try {
+    const engine = getTTSProvider(settings).name;
+    const voice = await resolveVoice(video.voicePresetId ?? settings.defaultVoicePresetId, engine);
+    const speed = (video.voiceSettings as { speed?: number } | null)?.speed ?? (voice.settings as { speed?: number } | null)?.speed ?? 1;
+    return await calibratedWordsPerMinute({ provider: engine, voiceId: voice.voiceId, speed, fallbackWpm: settings.wordsPerMinute });
+  } catch {
+    return settings.wordsPerMinute;
+  }
+}
+
 async function buildScriptContext(vc: VideoContext): Promise<ScriptContext> {
   const { video, settings, template, categoryName } = vc;
   const research = video.topic ? await loadResearchContext(video.topic.id) : { summary: null, facts: [], uncertain: [], cautions: [], sources: [] };
@@ -101,7 +117,7 @@ async function buildScriptContext(vc: VideoContext): Promise<ScriptContext> {
     categoryName,
     research,
     targetDurationSec: video.targetDurationSec,
-    wordsPerMinute: settings.wordsPerMinute,
+    wordsPerMinute: await scriptWordsPerMinute(vc),
     tolerancePct: settings.durationTolerancePct,
     pacing: template.script.pacing,
     tone: template.script.tone,
@@ -123,7 +139,7 @@ export const generateScriptHandler: StepHandler = async (ctx) => {
     draft,
     source: "AI",
     targetDurationSec: vc.video.targetDurationSec,
-    wordsPerMinute: vc.settings.wordsPerMinute,
+    wordsPerMinute: scriptCtx.wordsPerMinute,
     aiModel: ai.model,
   });
   return {
@@ -178,7 +194,7 @@ export const validateScriptHandler: StepHandler = async (ctx) => {
       draft: revision.draft,
       source: "AI_REVISION",
       targetDurationSec: vc.video.targetDurationSec,
-      wordsPerMinute: vc.settings.wordsPerMinute,
+      wordsPerMinute: scriptCtx.wordsPerMinute,
       aiModel: ai.model,
     });
   }
