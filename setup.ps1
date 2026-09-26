@@ -8,10 +8,16 @@ if (-not $NoStart -and -not (Get-Command docker -ErrorAction SilentlyContinue)) 
   Write-Host "Docker is not installed. Install Docker Desktop: https://www.docker.com/products/docker-desktop"
   exit 1
 }
-if (-not $NoStart) { docker info *> $null }
-if (-not $NoStart -and $LASTEXITCODE -ne 0) {
-  Write-Host "Docker is not running. Start Docker Desktop, wait until it is ready, then run .\setup.ps1 again."
-  exit 1
+if (-not $NoStart) {
+  # Windows PowerShell 5.1 turns a native command's stderr into an exception under "Stop".
+  $ErrorActionPreference = "Continue"
+  docker info 2>&1 | Out-Null
+  $dockerOk = $LASTEXITCODE -eq 0
+  $ErrorActionPreference = "Stop"
+  if (-not $dockerOk) {
+    Write-Host "Docker is not running. Open Docker Desktop, wait until it shows 'Engine running', then run setup again."
+    exit 1
+  }
 }
 
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }

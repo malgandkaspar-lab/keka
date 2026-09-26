@@ -96,8 +96,9 @@ Paid providers are optional and can be selected per user in **Settings**.
 
 ```bash
 ./setup.sh          # macOS / Linux
-.\setup.ps1         # Windows PowerShell
 ```
+
+On Windows, double-click **`setup.cmd`** in the project folder (or run `powershell -ExecutionPolicy Bypass -File .\setup.ps1`; plain `.\setup.ps1` is blocked by the default PowerShell script policy).
 
 The script creates `.env` with freshly generated secrets, asks for your free Pexels key and starts everything. Then open <http://localhost:3000>.
 
