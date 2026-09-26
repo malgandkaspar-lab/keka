@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { countSpokenWords, estimateSpeechDurationSec, isWithinDuration, targetWordCount } from "@/services/scripts/duration";
-import { draftFromManualText, fullText, programmaticChecks, reviewIssues, type ScriptDraft } from "@/services/scripts/script-service";
-import { ASTRONAUT_SCRIPT } from "../helpers/fakes";
+import { draftFromManualText, draftScript, fullText, programmaticChecks, reviewIssues, type ScriptContext, type ScriptDraft } from "@/services/scripts/script-service";
+import { ASTRONAUT_SCRIPT, FakeAIProvider } from "../helpers/fakes";
 import { impliedWordsPerMinute } from "@/services/tts/speech-rate";
 
 const ctx = { targetDurationSec: 30, wordsPerMinute: 165, tolerancePct: 0.12, recentHooks: [] };
@@ -99,5 +99,60 @@ describe("speaking-rate calibration", () => {
     expect(wpm).toBeGreaterThan(190);
     expect(estimateSpeechDurationSec(text, wpm)).toBeCloseTo(20.6, 0);
     expect(impliedWordsPerMinute("Too short.", 3)).toBeNull();
+  });
+});
+
+describe("script length fitting", () => {
+  const scriptCtx: ScriptContext = {
+    topicTitle: "Why do astronauts grow taller in space?",
+    categoryName: "Space",
+    research: { summary: null, facts: ["Astronauts can grow up to 3% taller in microgravity"], uncertain: [], cautions: [] },
+    targetDurationSec: 30,
+    wordsPerMinute: 165,
+    tolerancePct: 0.12,
+    pacing: "fast",
+    tone: "curious",
+    includeCta: true,
+    recentHooks: [],
+  };
+  const tooShort: ScriptDraft = {
+    hookStyle: "question",
+    sections: [
+      { type: "HOOK", text: "Why do astronauts come home taller?" },
+      { type: "PAYOFF", text: "Gravity squeezes the spine." },
+    ],
+    factsUsed: [],
+  };
+
+  it("lengthens a draft that is far too short before quality control", async () => {
+    const ai = new FakeAIProvider();
+    ai.overrides["script.generate"] = () => tooShort;
+    const prompts: string[] = [];
+    ai.overrides["script.fit"] = (request) => (prompts.push(request.prompt), ASTRONAUT_SCRIPT);
+    const { draft } = await draftScript(ai, scriptCtx);
+    expect(ai.calls["script.fit"]).toBe(1);
+    expect(prompts[0]).toMatch(/Make it LONGER/);
+    expect(programmaticChecks(draft, scriptCtx).passed).toBe(true);
+  });
+
+  it("keeps the closest draft when fitting does not help, and skips fitting when the length is right", async () => {
+    const ai = new FakeAIProvider();
+    ai.overrides["script.generate"] = () => tooShort;
+    ai.overrides["script.fit"] = () => ({ ...tooShort, sections: [tooShort.sections[0]!] });
+    const { draft } = await draftScript(ai, scriptCtx);
+    expect(ai.calls["script.fit"]).toBe(2);
+    expect(fullText(draft)).toBe(fullText(tooShort));
+
+    const good = new FakeAIProvider();
+    await draftScript(good, scriptCtx);
+    expect(good.calls["script.fit"]).toBeUndefined();
+  });
+
+  it("asks for a per-section sentence plan", async () => {
+    const ai = new FakeAIProvider();
+    let prompt = "";
+    ai.overrides["script.generate"] = (request) => ((prompt = request.prompt), ASTRONAUT_SCRIPT);
+    await draftScript(ai, scriptCtx);
+    expect(prompt).toMatch(/INFORMATION: \d+ sentences/);
   });
 });

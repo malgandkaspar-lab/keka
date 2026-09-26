@@ -3,7 +3,7 @@ import { evaluateCandidates, overallScore, type TopicCandidate } from "@/service
 import { checkMetadata, composeDescription, normalizeHashtag, sanitizeMetadata } from "@/services/metadata/metadata-service";
 import { internalRepetition, similarity } from "@/services/dedup/similarity";
 import { checkContentPolicy } from "@/services/policy/content-policy";
-import { assessSufficiency } from "@/services/research/research-service";
+import { assessSufficiency, isGroundedIn } from "@/services/research/research-service";
 import { sourceReliability } from "@/services/research/source-reliability";
 
 const scores = { curiosity: 9, novelty: 8, educationalValue: 9, entertainment: 8, visualPotential: 8, shortFormPotential: 9, factualVerifiability: 9 };
@@ -58,6 +58,17 @@ describe("research sufficiency", () => {
     expect(assessSufficiency({ ...base, claims: [fact("https://blog.example.com/x"), fact("https://blog.example.com/x"), fact("https://blog.example.com/x")] }, sources)).toBe(false);
     expect(sourceReliability("https://www.reddit.com/r/space")).toBeLessThan(0.5);
     expect(sourceReliability("https://science.nasa.gov/x")).toBeGreaterThan(0.9);
+  });
+});
+
+describe("fact grounding", () => {
+  const text = "A 2012 survey measured all branches of the Great Wall at 21,196 kilometres. The Ming dynasty rebuilt most sections.";
+  it("accepts facts stated in the sources and rejects invented details", () => {
+    expect(isGroundedIn("A survey in 2012 measured all branches of the wall at 21196 kilometres", text)).toBe(true);
+    expect(isGroundedIn("The Ming dynasty rebuilt most sections of the Great Wall", text)).toBe(true);
+    expect(isGroundedIn("A 2015 survey measured the wall at 21,196 kilometres", text)).toBe(false);
+    expect(isGroundedIn("The wall is visible from the Moon with the naked eye", text)).toBe(false);
+    expect(isGroundedIn("Ming rebuilt", text)).toBe(false);
   });
 });
 

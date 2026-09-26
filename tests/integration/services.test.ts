@@ -13,7 +13,8 @@ import { editMetadata, editScript } from "@/services/videos/manual-edits";
 import { createManualTopic } from "@/services/topics/topic-service";
 import { rateLimit } from "@/lib/rate-limit";
 import { createTestUser, resetDatabase } from "../helpers/db";
-import { FakeYouTubeProvider } from "../helpers/fakes";
+import { FakeAIProvider, FakeYouTubeProvider } from "../helpers/fakes";
+import { researchTopic } from "@/services/research/research-service";
 
 beforeEach(async () => {
   await resetDatabase();
@@ -138,5 +139,54 @@ describe("manual overrides", () => {
       editMetadata(user.id, video.id, { title: "Warum Astronauten größer werden", description: "Die Schwerkraft drückt die Wirbelsäule zusammen und im All fehlt das völlig.", hashtags: [], tags: [] }),
     ).rejects.toBeInstanceOf(LanguageValidationError);
     await expect(editScript(user.id, video.id, "Kosmoses kasvavad astronaudid pikemaks, sest gravitatsioon ei suru nende selgroogu kokku.")).rejects.toBeInstanceOf(LanguageValidationError);
+  });
+});
+
+describe("research with a weak model", () => {
+  it("recovers grounded facts when the fact sheet comes back empty, and rejects invented ones", async () => {
+    const user = await createTestUser();
+    const { topic } = await createManualTopic({ userId: user.id, title: "Why is the Great Wall of China so long?", categoryKey: "history", similarityThreshold: 0.55 });
+    const ai = new FakeAIProvider();
+    const notes = [
+      "SOURCE: Great Wall of China - Wikipedia (https://en.wikipedia.org/wiki/Great_Wall_of_China)",
+      "The Great Wall of China is a series of fortifications built across the northern borders of ancient Chinese states.",
+      "The best-known sections were built by the Ming dynasty between 1368 and 1644.",
+      "A 2012 survey measured all branches of the wall at 21,196 kilometres.",
+      "Construction used rammed earth, stones, wood and later bricks made in kilns near the wall.",
+    ].join("\n");
+    ai.researchWithWebSearch = async () => ({
+      notes,
+      sources: [{ url: "https://en.wikipedia.org/wiki/Great_Wall_of_China", title: "Great Wall of China - Wikipedia" }],
+      usage: { inputTokens: 0, outputTokens: 0, webSearches: 1, costUsd: 0, model: "fake-model" },
+    });
+    ai.overrides["research.extract"] = () => ({ summary: "", claims: [], sufficient: false, recommendedAngle: "", cautions: [] });
+    ai.overrides["research.facts"] = () => ({
+      facts: [
+        { statement: "The best-known sections were built by the Ming dynasty between 1368 and 1644.", source: 1 },
+        { statement: "A 2012 survey measured all branches of the wall at 21,196 kilometres.", source: 1 },
+        { statement: "Builders used rammed earth, stones, wood and bricks made in kilns.", source: 1 },
+        { statement: "The wall is clearly visible from the Moon with the naked eye.", source: 1 },
+        { statement: "The wall was finished in 1850 by the Qing emperor.", source: 1 },
+      ],
+    });
+    const outcome = await researchTopic({ topic, ai });
+    const statements = outcome.extraction.claims.map((c) => c.statement);
+    expect(outcome.status).toBe("COMPLETED");
+    expect(statements).toHaveLength(3);
+    expect(statements.join(" ")).not.toMatch(/Moon|1850/);
+    expect(outcome.extraction.claims.every((c) => c.sourceUrls[0] === "https://en.wikipedia.org/wiki/Great_Wall_of_China")).toBe(true);
+    expect(outcome.extraction.summary.length).toBeGreaterThan(40);
+  });
+
+  it("does not reuse an insufficient cached result", async () => {
+    const user = await createTestUser();
+    const { topic } = await createManualTopic({ userId: user.id, title: "Why do cats purr so much?", categoryKey: "animals", similarityThreshold: 0.55 });
+    const ai = new FakeAIProvider();
+    ai.overrides["research.extract"] = () => ({ summary: "Unknown.", claims: [], sufficient: false, recommendedAngle: "", cautions: [] });
+    expect((await researchTopic({ topic, ai })).status).toBe("INSUFFICIENT");
+    delete ai.overrides["research.extract"];
+    const again = await researchTopic({ topic, ai });
+    expect(again.fromCache).toBe(false);
+    expect(again.status).toBe("COMPLETED");
   });
 });

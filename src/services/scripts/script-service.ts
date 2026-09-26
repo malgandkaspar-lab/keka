@@ -121,6 +121,28 @@ function describePacing(pacing: ScriptContext["pacing"]): string {
   }
 }
 
+/** Sentence plan per section: small models follow sentence counts far better than word counts. */
+function sectionPlan(ctx: ScriptContext): string {
+  const words = targetWordCount(ctx.targetDurationSec, ctx.wordsPerMinute).target;
+  const perSentence = ctx.pacing === "fast" ? 9 : 12;
+  const body = Math.max(3, Math.round((words - 10 - (ctx.includeCta ? 6 : 0)) / perSentence));
+  const curiosity = Math.max(1, Math.round(body * 0.2));
+  const escalation = Math.max(1, Math.round(body * 0.25));
+  const payoff = Math.max(1, Math.round(body * 0.2));
+  const information = Math.max(1, body - curiosity - escalation - payoff);
+  return [
+    `Section plan (about ${perSentence} words per sentence):`,
+    "- HOOK: 1 sentence, max 12 words",
+    `- CURIOSITY: ${curiosity} sentence(s)`,
+    `- INFORMATION: ${information} sentences`,
+    `- ESCALATION: ${escalation} sentence(s)`,
+    `- PAYOFF: ${payoff} sentence(s)`,
+    ctx.includeCta ? "- CTA: 1 short sentence" : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildScriptPrompt(ctx: ScriptContext, revision?: { previous: string; issues: string[] }): string {
   const words = targetWordCount(ctx.targetDurationSec, ctx.wordsPerMinute);
   const lines = [
@@ -130,6 +152,7 @@ function buildScriptPrompt(ctx: ScriptContext, revision?: { previous: string; is
     `Category: ${ctx.categoryName}`,
     `Tone: ${ctx.tone}. ${describePacing(ctx.pacing)}`,
     `LENGTH IS CRITICAL: the narration is read at about ${ctx.wordsPerMinute} words per minute, so the whole script must be ${words.min}-${words.max} words (aim for ${words.target}). Count carefully.`,
+    sectionPlan(ctx),
     "Structure (adapt it, do not make it mechanical): HOOK (first 1-3 seconds, max 12 words) -> CURIOSITY -> INFORMATION -> ESCALATION or SURPRISE -> PAYOFF" +
       (ctx.includeCta ? " -> a short, natural CTA (max 8 words)." : ". Do not add a CTA."),
     "Hook styles you may choose from: curiosity, contrarian fact, question, unexpected fact, story, challenge, number.",
@@ -153,6 +176,41 @@ function buildScriptPrompt(ctx: ScriptContext, revision?: { previous: string; is
   return lines.filter(Boolean).join("\n");
 }
 
+const MAX_FIT_PASSES = 2;
+
+function normaliseDraft(draft: ScriptDraft): ScriptDraft {
+  // The first section must be the hook.
+  if (draft.sections[0] && draft.sections[0].type !== "HOOK") draft.sections[0] = { ...draft.sections[0], type: "HOOK" };
+  return draft;
+}
+
+/** How far a draft's estimated spoken duration is from the target, in seconds. */
+function durationGap(draft: ScriptDraft, ctx: ScriptContext): number {
+  return Math.abs(estimateSpeechDurationSec(fullText(draft), ctx.wordsPerMinute) - ctx.targetDurationSec);
+}
+
+function buildFitPrompt(ctx: ScriptContext, draft: ScriptDraft): string {
+  const words = targetWordCount(ctx.targetDurationSec, ctx.wordsPerMinute);
+  const current = countWords(fullText(draft));
+  const tooShort = current < words.target;
+  const delta = Math.abs(words.target - current);
+  const sentences = Math.max(1, Math.round(delta / (ctx.pacing === "fast" ? 9 : 12)));
+  return [
+    `This YouTube Short script about "${ctx.topicTitle}" has ${current} words, but it must have ${words.min}-${words.max} words (aim for ${words.target}).`,
+    tooShort
+      ? `Make it LONGER: add about ${delta} words (about ${sentences} more sentences). Keep the hook. Expand CURIOSITY, INFORMATION and ESCALATION with concrete details, numbers, comparisons and explanation of how and why. Every section except the hook should have at least 2 sentences.`
+      : `Make it SHORTER: remove about ${delta} words (about ${sentences} sentences). Keep the hook and the payoff; cut the least important details.`,
+    "Keep the same topic, facts and English style. Return the complete revised script.",
+    sectionPlan(ctx),
+    "",
+    "Research you may rely on (use ONLY these facts; if there are few, explain the mechanism in more depth instead of inventing facts):",
+    ...(ctx.research.facts.length ? ctx.research.facts.map((f) => `- ${f}`) : ["- (no verified facts available: keep claims general and clearly hedged)"]),
+    "",
+    "Current script:",
+    ...draft.sections.map((s) => `${s.type}: ${s.text}`),
+  ].join("\n");
+}
+
 export async function draftScript(
   ai: AIProvider,
   ctx: ScriptContext,
@@ -167,10 +225,28 @@ export async function draftScript(
     effort: "high",
     signal,
   });
-  const draft = result.data;
-  // Normalise: the first section must be the hook.
-  if (draft.sections[0]?.type !== "HOOK" && draft.sections[0]) draft.sections[0] = { ...draft.sections[0], type: "HOOK" };
-  return { draft, usage: result.usage };
+  const usage = { ...result.usage };
+  let draft = normaliseDraft(result.data);
+  // Length fitting: models (especially small local ones) often miss the word budget.
+  for (let pass = 0; pass < MAX_FIT_PASSES; pass++) {
+    const estimated = estimateSpeechDurationSec(fullText(draft), ctx.wordsPerMinute);
+    if (isWithinDuration(estimated, ctx.targetDurationSec, ctx.tolerancePct)) break;
+    const fitted = await ai.generateStructured({
+      purpose: "script.fit",
+      system: SCRIPT_SYSTEM,
+      prompt: buildFitPrompt(ctx, draft),
+      schema: scriptDraftSchema,
+      effort: "medium",
+      signal,
+    });
+    usage.inputTokens += fitted.usage.inputTokens;
+    usage.outputTokens += fitted.usage.outputTokens;
+    usage.webSearches += fitted.usage.webSearches;
+    usage.costUsd += fitted.usage.costUsd;
+    const candidate = normaliseDraft(fitted.data);
+    if (durationGap(candidate, ctx) < durationGap(draft, ctx)) draft = candidate;
+  }
+  return { draft, usage };
 }
 
 const FORMATTING_PATTERNS: [RegExp, string][] = [

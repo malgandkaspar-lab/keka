@@ -81,8 +81,11 @@ export class FakeAIProvider implements AIProvider {
           recommendedAngle: "Gravity compresses the spine",
           cautions: ["Astronauts do not permanently grow taller"],
         };
+      case "research.facts":
+        return { facts: [{ statement: "Astronauts grow up to 3 percent taller in microgravity", source: 1 }] };
       case "script.generate":
       case "script.revise":
+      case "script.fit":
         return ASTRONAUT_SCRIPT;
       case "script.review":
         return {
