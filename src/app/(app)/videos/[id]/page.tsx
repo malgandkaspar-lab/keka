@@ -124,7 +124,15 @@ export default async function VideoPage(props: PageProps<"/videos/[id]">) {
             disabled={processing || uploaded}
             current={{
               voicePresetId: video.voicePresetId ?? voicePreset?.id ?? null,
-              speed: ((video.voiceSettings as { speed?: number } | null)?.speed ?? 1) || 1,
+              voice: {
+                speed: 1,
+                stability: 0.45,
+                similarityBoost: 0.8,
+                style: 0.25,
+                useSpeakerBoost: true,
+                ...((voicePreset?.settings ?? {}) as object),
+                ...((video.voiceSettings ?? {}) as object),
+              },
               musicMode: video.musicMode,
               musicTrackId: video.musicMode === "manual" ? video.musicTrackId : null,
               privacy: video.privacy,

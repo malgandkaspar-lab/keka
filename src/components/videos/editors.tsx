@@ -126,7 +126,10 @@ export function ComponentEditor({
   voices: { id: string; name: string }[];
   tracks: { id: string; title: string; moods: string[] }[];
   moods: string[];
-  current: { voicePresetId: string | null; speed: number; musicMode: string; musicTrackId: string | null; privacy: string; scheduledPublishAt: string | null; autoPublish: boolean };
+  current: {
+    voicePresetId: string | null;
+    voice: { speed: number; stability: number; similarityBoost: number; style: number; useSpeakerBoost: boolean };
+    musicMode: string; musicTrackId: string | null; privacy: string; scheduledPublishAt: string | null; autoPublish: boolean };
   disabled: boolean;
 }) {
   const { busy, error, run } = useAction();
@@ -138,7 +141,13 @@ export function ComponentEditor({
     const body: Record<string, unknown> = {};
     if (kind === "voice") {
       body.voicePresetId = form.get("voice");
-      body.voiceSettings = { speed: Number(form.get("speed")) };
+      body.voiceSettings = {
+        speed: Number(form.get("speed")),
+        stability: Number(form.get("stability")),
+        similarityBoost: Number(form.get("similarityBoost")),
+        style: Number(form.get("style")),
+        useSpeakerBoost: form.get("useSpeakerBoost") === "on",
+      };
     } else if (kind === "music") {
       const choice = String(form.get("music"));
       if (choice.startsWith("track:")) body.musicTrackId = choice.slice(6);
@@ -159,7 +168,7 @@ export function ComponentEditor({
   return (
     <Card className="space-y-6">
       <CardTitle>Voice, music & publishing</CardTitle>
-      <form onSubmit={(e) => submit(e, "voice")} className="grid gap-3 sm:grid-cols-[1fr_120px_auto] sm:items-end">
+      <form onSubmit={(e) => submit(e, "voice")} className="space-y-3">
         <div>
           <Label htmlFor="voice">English voice</Label>
           <Select id="voice" name="voice" defaultValue={current.voicePresetId ?? voices[0]?.id} disabled={disabled}>
@@ -170,13 +179,32 @@ export function ComponentEditor({
             ))}
           </Select>
         </div>
-        <div>
-          <Label htmlFor="speed">Speed</Label>
-          <Input id="speed" name="speed" type="number" step="0.05" min={0.7} max={1.2} defaultValue={current.speed} disabled={disabled} />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div>
+            <Label htmlFor="speed" hint="0.7-1.2">Speed</Label>
+            <Input id="speed" name="speed" type="number" step="0.05" min={0.7} max={1.2} defaultValue={current.voice.speed} disabled={disabled} />
+          </div>
+          <div>
+            <Label htmlFor="stability" hint="0-1">Stability</Label>
+            <Input id="stability" name="stability" type="number" step="0.05" min={0} max={1} defaultValue={current.voice.stability} disabled={disabled} />
+          </div>
+          <div>
+            <Label htmlFor="similarityBoost" hint="0-1">Similarity</Label>
+            <Input id="similarityBoost" name="similarityBoost" type="number" step="0.05" min={0} max={1} defaultValue={current.voice.similarityBoost} disabled={disabled} />
+          </div>
+          <div>
+            <Label htmlFor="style" hint="0-1">Style</Label>
+            <Input id="style" name="style" type="number" step="0.05" min={0} max={1} defaultValue={current.voice.style} disabled={disabled} />
+          </div>
         </div>
-        <Button type="submit" variant="secondary" disabled={disabled || !!busy}>
-          Change voice
-        </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="useSpeakerBoost" defaultChecked={current.voice.useSpeakerBoost} className="accent-indigo-500" disabled={disabled} /> Speaker boost
+          </label>
+          <Button type="submit" variant="secondary" disabled={disabled || !!busy}>
+            Apply voice settings
+          </Button>
+        </div>
       </form>
       <form onSubmit={(e) => submit(e, "music")} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
         <div>

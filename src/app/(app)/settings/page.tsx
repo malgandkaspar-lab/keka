@@ -1,4 +1,6 @@
 import { IntegrationStatus, MusicLibrary, SettingsForm, VoiceSync } from "@/components/forms/settings-form";
+import { SubtitleStyleEditor } from "@/components/forms/subtitle-style-editor";
+import { listCustomSubtitleStyles, SUBTITLE_FONTS } from "@/services/subtitles/style-service";
 import { PageHeader } from "@/components/ui/primitives";
 import { credentialStatus } from "@/config/env";
 import { AI_MODEL_PRICING } from "@/config/pricing";
@@ -12,29 +14,33 @@ export const metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   const user = await requirePageUser();
-  const [settings, categories, voices, templates, tracks] = await Promise.all([
+  const [settings, categories, voices, templates, tracks, customStyles] = await Promise.all([
     getUserSettings(user.id),
     db.topicCategory.findMany({ where: { enabled: true }, orderBy: { sortOrder: "asc" } }),
     db.voicePreset.findMany({ where: { enabled: true, language: "en" }, orderBy: { name: "asc" } }),
     db.generationTemplate.findMany({ where: { enabled: true } }),
     db.musicTrack.findMany({ where: { OR: [{ userId: user.id }, { userId: null }] }, orderBy: { createdAt: "desc" } }),
+    listCustomSubtitleStyles(user.id),
   ]);
 
   return (
     <>
       <PageHeader title="Settings" description="Defaults, limits, providers and libraries. English is the only supported content language." />
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+        <div className="space-y-6">
         <SettingsForm
           settings={settings}
           options={{
             categories: categories.map((c) => ({ key: c.key, name: c.name })),
             voices: voices.map((v) => ({ id: v.id, name: v.name })),
             templates: templates.map((t) => ({ key: t.key, name: t.name })),
-            subtitleStyles: Object.values(SUBTITLE_STYLE_PRESETS).map((s) => ({ key: s.key, name: s.name })),
+            subtitleStyles: [...Object.values(SUBTITLE_STYLE_PRESETS), ...customStyles].map((s) => ({ key: s.key, name: s.name })),
             moods: Object.keys(MOOD_PROFILES),
             aiModels: Object.keys(AI_MODEL_PRICING),
           }}
         />
+        <SubtitleStyleEditor fonts={SUBTITLE_FONTS} custom={customStyles} base={SUBTITLE_STYLE_PRESETS.fast_viral!} />
+        </div>
         <div className="space-y-6">
           <IntegrationStatus status={credentialStatus()} />
           <VoiceSync count={voices.length} />

@@ -75,7 +75,7 @@ afterAll(async () => {
   setSpeechProvidersForTesting();
   setVideoProviderForTesting(undefined);
   setYouTubeProviderForTesting(undefined);
-  await rm("./storage/test", { recursive: true, force: true });
+  if (!process.env.KEEP_TEST_MEDIA) await rm("./storage/test", { recursive: true, force: true });
 });
 
 async function connectFakeYouTube(userId: string) {
