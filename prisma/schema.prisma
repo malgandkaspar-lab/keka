@@ -1,0 +1,803 @@
+// Shorts Factory database schema.
+// All primary keys are UUIDs; all tables carry createdAt/updatedAt where they are mutable.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum VideoStatus {
+  DRAFT
+  TOPIC_GENERATING
+  RESEARCHING
+  SCRIPT_GENERATING
+  SCRIPT_REVIEW
+  VOICE_GENERATING
+  MEDIA_SEARCHING
+  EDITING
+  SUBTITLES_GENERATING
+  RENDERING
+  QUALITY_CHECK
+  READY
+  UPLOADING
+  SCHEDULED
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+enum PipelineStep {
+  GENERATE_TOPIC
+  RESEARCH_TOPIC
+  GENERATE_SCRIPT
+  VALIDATE_SCRIPT
+  GENERATE_VOICE
+  PLAN_VISUALS
+  SEARCH_FOOTAGE
+  SELECT_FOOTAGE
+  GENERATE_SUBTITLES
+  SELECT_MUSIC
+  RENDER_VIDEO
+  QUALITY_CHECK
+  GENERATE_METADATA
+  GENERATE_THUMBNAIL
+  CONTENT_QA
+  YOUTUBE_UPLOAD
+  YOUTUBE_PUBLISH
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum TopicSource {
+  MANUAL
+  AI
+}
+
+enum TopicStatus {
+  PROPOSED
+  USED
+  REJECTED
+}
+
+enum ResearchStatus {
+  PENDING
+  COMPLETED
+  INSUFFICIENT
+  FAILED
+}
+
+enum ClaimType {
+  ESTABLISHED_FACT
+  UNCERTAIN
+  SPECULATION
+  OPINION
+}
+
+enum ScriptVersionSource {
+  AI
+  AI_REVISION
+  MANUAL
+}
+
+enum ScriptVersionStatus {
+  DRAFT
+  VALID
+  INVALID
+}
+
+enum MediaKind {
+  VIDEO_CLIP
+  IMAGE
+  AUDIO_VOICE
+  AUDIO_MUSIC
+  AUDIO_SFX
+  SUBTITLE
+  RENDER
+  THUMBNAIL
+  OTHER
+}
+
+enum MediaSource {
+  PEXELS
+  ELEVENLABS
+  LOCAL_LIBRARY
+  GENERATED
+  UPLOAD
+  RENDERED
+}
+
+enum PrivacyStatus {
+  PRIVATE
+  UNLISTED
+  PUBLIC
+  SCHEDULED
+}
+
+enum PublishJobStatus {
+  PENDING
+  UPLOADING
+  UPLOADED
+  SCHEDULED
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+enum YouTubeAccountStatus {
+  ACTIVE
+  REVOKED
+  ERROR
+}
+
+enum LogLevel {
+  DEBUG
+  INFO
+  WARN
+  ERROR
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         UserRole @default(USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions          Session[]
+  projects          Project[]
+  channels          Channel[]
+  youtubeAccounts   YouTubeAccount[]
+  topics            Topic[]
+  videos            Video[]
+  generationJobs    GenerationJob[]
+  schedules         Schedule[]
+  settings          AppSetting[]
+  templates         GenerationTemplate[]
+  mediaAssets       MediaAsset[]
+  musicTracks       MusicTrack[]
+  logs              SystemLog[]
+  categories        TopicCategory[]
+  voicePresets      VoicePreset[]
+  insights          PerformanceInsight[]
+}
+
+model Session {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Project {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  name        String
+  description String?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videos   Video[]
+  topics   Topic[]
+  channels Channel[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model Channel {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  projectId        String?  @db.Uuid
+  youtubeAccountId String?  @db.Uuid
+  name             String
+  description      String?
+  defaults         Json     @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  youtubeAccount YouTubeAccount? @relation(fields: [youtubeAccountId], references: [id], onDelete: SetNull)
+  videos         Video[]
+  schedules      Schedule[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model YouTubeAccount {
+  id               String               @id @default(uuid()) @db.Uuid
+  userId           String               @db.Uuid
+  googleChannelId  String
+  channelTitle     String
+  channelThumbnail String?
+  accessTokenEnc   String
+  refreshTokenEnc  String?
+  tokenExpiresAt   DateTime?
+  scopes           String[]
+  status           YouTubeAccountStatus @default(ACTIVE)
+  lastError        String?
+  isDefault        Boolean              @default(false)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channels    Channel[]
+  publishJobs PublishJob[]
+
+  @@unique([userId, googleChannelId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+model AppSetting {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  key       String
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+}
+
+/// Topic categories are data, not code. Built-in categories have userId = null.
+model TopicCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String?
+  promptHints String?
+  enabled     Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  userId      String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// English voices available for narration (synced from the TTS provider or added manually).
+model VoicePreset {
+  id          String   @id @default(uuid()) @db.Uuid
+  provider    String
+  voiceId     String
+  name        String
+  description String?
+  gender      String?
+  styles      String[]
+  language    String   @default("en")
+  settings    Json     @default("{}")
+  previewUrl  String?
+  enabled     Boolean  @default(true)
+  userId      String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, voiceId])
+}
+
+/// Visual + subtitle + pacing template (FAST_VIRAL, CINEMATIC, MINIMAL, ...).
+model GenerationTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String?
+  isBuiltIn   Boolean  @default(false)
+  enabled     Boolean  @default(true)
+  config      Json
+  userId      String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user      User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videos    Video[]
+  schedules Schedule[]
+}
+
+// ---------------------------------------------------------------------------
+// Content
+// ---------------------------------------------------------------------------
+
+model Topic {
+  id              String         @id @default(uuid()) @db.Uuid
+  userId          String         @db.Uuid
+  projectId       String?        @db.Uuid
+  category        String
+  title           String
+  angle           String?
+  normalizedTitle String
+  source          TopicSource
+  status          TopicStatus    @default(PROPOSED)
+  scores          Json           @default("{}")
+  overallScore    Float?
+  researchStatus  ResearchStatus @default(PENDING)
+  researchSummary String?
+  researchData    Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project    Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  videos     Video[]
+  references ResearchReference[]
+  claims     ResearchClaim[]
+
+  @@index([userId, createdAt])
+  @@index([userId, category])
+}
+
+model ResearchReference {
+  id          String   @id @default(uuid()) @db.Uuid
+  topicId     String   @db.Uuid
+  title       String
+  url         String
+  publisher   String?
+  snippet     String?
+  reliability Float?
+  accessedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([topicId, url])
+  @@index([topicId])
+}
+
+model ResearchClaim {
+  id         String    @id @default(uuid()) @db.Uuid
+  topicId    String    @db.Uuid
+  statement  String
+  type       ClaimType
+  confidence Float
+  sourceUrls String[]
+  createdAt  DateTime  @default(now())
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@index([topicId])
+}
+
+model Video {
+  id                  String         @id @default(uuid()) @db.Uuid
+  userId              String         @db.Uuid
+  projectId           String         @db.Uuid
+  channelId           String?        @db.Uuid
+  topicId             String?        @db.Uuid
+  templateId          String?        @db.Uuid
+  scheduleId          String?        @db.Uuid
+  status              VideoStatus    @default(DRAFT)
+  requestedTopic      String?
+  autoTopic           Boolean        @default(false)
+  category            String
+  targetDurationSec   Int
+  actualDurationSec   Float?
+  voicePresetId       String?        @db.Uuid
+  voiceSettings       Json           @default("{}")
+  musicMode           String         @default("auto")
+  musicMood           String?
+  musicTrackId        String?        @db.Uuid
+  sfxEnabled          Boolean        @default(true)
+  title               String?
+  description         String?
+  hashtags            String[]
+  tags                String[]
+  thumbnailText       String?
+  metadataLocked      Boolean        @default(false)
+  renderAssetId       String?        @db.Uuid
+  thumbnailAssetId    String?        @db.Uuid
+  qualityReport       Json?
+  contentQaReport     Json?
+  autoPublish         Boolean        @default(false)
+  privacy             PrivacyStatus  @default(PRIVATE)
+  scheduledPublishAt  DateTime?
+  youtubeAccountId    String?        @db.Uuid
+  youtubeVideoId      String?        @unique
+  youtubeUrl          String?
+  youtubeStatus       String?
+  uploadedAt          DateTime?
+  publishedAt         DateTime?
+  failedStep          PipelineStep?
+  error               String?
+  costEstimateUsd     Float          @default(0)
+  cancelRequested     Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project       Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  channel       Channel?            @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  topic         Topic?              @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  template      GenerationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  schedule      Schedule?           @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  musicTrack    MusicTrack?         @relation(fields: [musicTrackId], references: [id], onDelete: SetNull)
+  renderAsset   MediaAsset?         @relation("VideoRender", fields: [renderAssetId], references: [id], onDelete: SetNull)
+  thumbnailAsset MediaAsset?        @relation("VideoThumbnail", fields: [thumbnailAssetId], references: [id], onDelete: SetNull)
+  script        Script?
+  voiceovers    Voiceover[]
+  scenes        VideoScene[]
+  subtitles     Subtitle[]
+  jobs          GenerationJob[]
+  publishJobs   PublishJob[]
+  analytics     AnalyticsSnapshot[]
+  logs          SystemLog[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([scheduleId])
+}
+
+model Script {
+  id               String   @id @default(uuid()) @db.Uuid
+  videoId          String   @unique @db.Uuid
+  currentVersionId String?  @unique @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  video          Video           @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  currentVersion ScriptVersion?  @relation("CurrentScriptVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions       ScriptVersion[] @relation("ScriptVersions")
+}
+
+model ScriptVersion {
+  id                   String              @id @default(uuid()) @db.Uuid
+  scriptId             String              @db.Uuid
+  version              Int
+  source               ScriptVersionSource
+  status               ScriptVersionStatus @default(DRAFT)
+  hookStyle            String?
+  hook                 String
+  fullText             String
+  sections             Json
+  wordCount            Int
+  estimatedDurationSec Float
+  targetDurationSec    Int
+  wordsPerMinute       Int
+  language             String              @default("en")
+  validation           Json?
+  aiModel              String?
+  createdAt            DateTime            @default(now())
+
+  script     Script      @relation("ScriptVersions", fields: [scriptId], references: [id], onDelete: Cascade)
+  currentFor Script?     @relation("CurrentScriptVersion")
+  voiceovers Voiceover[]
+
+  @@unique([scriptId, version])
+}
+
+model MediaAsset {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String?     @db.Uuid
+  kind        MediaKind
+  storageKey  String      @unique
+  mimeType    String
+  sizeBytes   BigInt?
+  durationSec Float?
+  width       Int?
+  height      Int?
+  fps         Float?
+  source      MediaSource
+  sourceId    String?
+  sourceUrl   String?
+  author      String?
+  authorUrl   String?
+  license     String?
+  licenseUrl  String?
+  checksum    String?
+  metadata    Json        @default("{}")
+  createdAt   DateTime    @default(now())
+
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  scenes          VideoScene[]
+  voiceovers      Voiceover[]
+  subtitles       Subtitle[]
+  musicTracks     MusicTrack[]
+  renderFor       Video[]      @relation("VideoRender")
+  thumbnailFor    Video[]      @relation("VideoThumbnail")
+
+  @@index([source, sourceId])
+  @@index([kind])
+  @@index([checksum])
+}
+
+model Voiceover {
+  id              String   @id @default(uuid()) @db.Uuid
+  videoId         String   @db.Uuid
+  scriptVersionId String   @db.Uuid
+  assetId         String   @db.Uuid
+  provider        String
+  voiceId         String
+  voiceName       String?
+  modelId         String?
+  settings        Json     @default("{}")
+  cacheKey        String
+  durationSec     Float
+  alignment       Json?
+  metadata        Json     @default("{}")
+  isCurrent       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  video         Video         @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  scriptVersion ScriptVersion @relation(fields: [scriptVersionId], references: [id], onDelete: Cascade)
+  asset         MediaAsset    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@index([videoId, isCurrent])
+  @@index([cacheKey])
+}
+
+model VideoScene {
+  id                String      @id @default(uuid()) @db.Uuid
+  videoId           String      @db.Uuid
+  index             Int
+  startSec          Float
+  endSec            Float
+  narration         String
+  visualDescription String
+  keywords          String[]
+  fallbackKeywords  String[]
+  transition        String      @default("cut")
+  mediaAssetId      String?     @db.Uuid
+  candidates        Json        @default("[]")
+  searchLog         Json        @default("[]")
+  locked            Boolean     @default(false)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  video      Video       @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([videoId, index])
+}
+
+model Subtitle {
+  id               String      @id @default(uuid()) @db.Uuid
+  videoId          String      @db.Uuid
+  language         String      @default("en")
+  provider         String
+  styleKey         String
+  transcript       String
+  detectedLanguage String?
+  words            Json
+  cues             Json
+  assetId          String?     @db.Uuid
+  isCurrent        Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+
+  video Video       @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  asset MediaAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([videoId, isCurrent])
+}
+
+model MusicTrack {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String?     @db.Uuid
+  title       String
+  artist      String?
+  moods       String[]
+  bpm         Int?
+  durationSec Float
+  assetId     String      @db.Uuid
+  source      MediaSource
+  license     String
+  licenseUrl  String?
+  attribution String?
+  enabled     Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user   User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset  MediaAsset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  videos Video[]
+
+  @@index([enabled])
+}
+
+// ---------------------------------------------------------------------------
+// Jobs, publishing, scheduling
+// ---------------------------------------------------------------------------
+
+model GenerationJob {
+  id          String       @id @default(uuid()) @db.Uuid
+  videoId     String       @db.Uuid
+  userId      String       @db.Uuid
+  step        PipelineStep
+  status      JobStatus    @default(QUEUED)
+  queueName   String
+  queueJobId  String?
+  attempts    Int          @default(0)
+  maxAttempts Int          @default(3)
+  progress    Int          @default(0)
+  provider    String?
+  costUsd     Float        @default(0)
+  output      Json?
+  error       String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  durationMs  Int?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, step, status])
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model PublishJob {
+  id               String           @id @default(uuid()) @db.Uuid
+  videoId          String           @db.Uuid
+  youtubeAccountId String           @db.Uuid
+  status           PublishJobStatus @default(PENDING)
+  privacy          PrivacyStatus
+  publishAt        DateTime?
+  attempts         Int              @default(0)
+  youtubeVideoId   String?
+  error            String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  video          Video          @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  youtubeAccount YouTubeAccount @relation(fields: [youtubeAccountId], references: [id], onDelete: Cascade)
+
+  @@index([videoId])
+  @@index([status])
+}
+
+model Schedule {
+  id              String              @id @default(uuid()) @db.Uuid
+  userId          String              @db.Uuid
+  channelId       String?             @db.Uuid
+  templateId      String?             @db.Uuid
+  name            String
+  enabled         Boolean             @default(true)
+  autoMode        Boolean             @default(true)
+  daysOfWeek      Int[]
+  times           String[]
+  timezone        String              @default("UTC")
+  videosPerRun    Int                 @default(1)
+  categories      String[]
+  voicePresetId   String?             @db.Uuid
+  durationSec     Int                 @default(30)
+  musicMode       String              @default("auto")
+  privacy         PrivacyStatus       @default(PRIVATE)
+  autoPublish     Boolean             @default(true)
+  publishDelayMin Int                 @default(0)
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel  Channel?            @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  template GenerationTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  videos   Video[]
+
+  @@index([userId])
+  @@index([enabled, nextRunAt])
+}
+
+// ---------------------------------------------------------------------------
+// Analytics & observability
+// ---------------------------------------------------------------------------
+
+model AnalyticsSnapshot {
+  id                    String   @id @default(uuid()) @db.Uuid
+  videoId               String   @db.Uuid
+  youtubeVideoId        String
+  capturedAt            DateTime @default(now())
+  views                 Int?
+  likes                 Int?
+  comments              Int?
+  watchTimeMinutes      Float?
+  averageViewDuration   Float?
+  averageViewPercentage Float?
+  subscribersGained     Int?
+  subscribersLost       Int?
+  raw                   Json     @default("{}")
+
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, capturedAt])
+}
+
+/// Aggregated performance learnings (per dimension/value) used to inform future generation.
+model PerformanceInsight {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  dimension   String
+  value       String
+  sampleSize  Int
+  avgViews    Float
+  avgViewPct  Float?
+  avgLikes    Float?
+  score       Float
+  computedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dimension, value])
+}
+
+model SystemLog {
+  id         String        @id @default(uuid()) @db.Uuid
+  level      LogLevel
+  message    String
+  userId     String?       @db.Uuid
+  videoId    String?       @db.Uuid
+  jobId      String?
+  step       PipelineStep?
+  provider   String?
+  durationMs Int?
+  error      String?
+  context    Json          @default("{}")
+  createdAt  DateTime      @default(now())
+
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  video Video? @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, createdAt])
+  @@index([userId, createdAt])
+  @@index([level, createdAt])
+}
+
+/// Response cache for expensive external lookups (footage search, research).
+model ApiCache {
+  key       String   @id
+  namespace String
+  value     Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([namespace])
+  @@index([expiresAt])
+}
