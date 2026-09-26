@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { countSpokenWords, estimateSpeechDurationSec, isWithinDuration, targetWordCount } from "@/services/scripts/duration";
 import { draftFromManualText, draftScript, fullText, programmaticChecks, reviewIssues, type ScriptContext, type ScriptDraft } from "@/services/scripts/script-service";
 import { ASTRONAUT_SCRIPT, FakeAIProvider } from "../helpers/fakes";
@@ -156,3 +157,68 @@ describe("script length fitting", () => {
     expect(prompt).toMatch(/INFORMATION: \d+ sentences/);
   });
 });
+
+describe("script drafting with a small local model", () => {
+  const scriptCtx: ScriptContext = {
+    topicTitle: "5 facts about the Great Wall of China",
+    categoryName: "History",
+    research: { summary: null, facts: ["The Ming dynasty built the best-known sections between 1368 and 1644"], uncertain: [], cautions: [] },
+    targetDurationSec: 30,
+    wordsPerMinute: 210,
+    tolerancePct: 0.12,
+    pacing: "fast",
+    tone: "curious",
+    includeCta: true,
+    recentHooks: [],
+  };
+  type Props = Record<string, { minItems?: number }>;
+  const slots = (request: { schema: z.ZodType }) => {
+    const props = (z.toJSONSchema(request.schema) as { properties: Props }).properties;
+    return (key: string) => props[key]!.minItems!;
+  };
+  const fill = (count: number, sentence: string) => Array.from({ length: count }, (_, i) => `${sentence} number ${i + 1}.`);
+  const answer = (request: { schema: z.ZodType }, sentence: string) => {
+    const n = slots(request);
+    return {
+      hookStyle: "number",
+      hook: "The Great Wall is not one wall.",
+      curiosity: fill(n("curiosity"), sentence),
+      information: fill(n("information"), sentence),
+      escalation: fill(n("escalation"), sentence),
+      payoff: fill(n("payoff"), sentence),
+      cta: "Follow for more history.",
+      factsUsed: [],
+    };
+  };
+
+  it("asks for exact sentence counts and re-plans when the sentences come out short", async () => {
+    const ai = Object.assign(new FakeAIProvider(), { prefersSimpleOutput: true });
+    const counts: number[] = [];
+    ai.overrides["script.generate"] = (request) => (counts.push(slots(request)("information")), answer(request, "Ming soldiers guarded the wall"));
+    ai.overrides["script.fit"] = (request) => (counts.push(slots(request)("information")), answer(request, "Ming soldiers guarded the wall"));
+    const { draft } = await draftScript(ai, scriptCtx);
+    expect(ai.calls["script.fit"]).toBeGreaterThanOrEqual(1);
+    expect(counts[1]).toBeGreaterThan(counts[0]!);
+    expect(draft.sections.map((s) => s.type)).toEqual(["HOOK", "CURIOSITY", "INFORMATION", "ESCALATION", "PAYOFF", "CTA"]);
+    const duration = estimateSpeechDurationSec(fullText(draft), scriptCtx.wordsPerMinute);
+    expect(Math.abs(duration - 30)).toBeLessThan(30 * 0.12);
+  });
+
+  it("accepts a somewhat shorter script only as a last resort", () => {
+    const shortDraft: ScriptDraft = {
+      ...ASTRONAUT_SCRIPT,
+      sections: ASTRONAUT_SCRIPT.sections.filter((s) => s.type !== "ESCALATION"),
+    };
+    const ctx60 = { ...ctx, targetDurationSec: 30, wordsPerMinute: 150 };
+    const duration = estimateSpeechDurationSec(fullText(shortDraft), 150);
+    expect(duration).toBeGreaterThan(18);
+    expect(duration).toBeLessThan(26);
+    expect(programmaticChecks(shortDraft, ctx60).passed).toBe(false);
+    expect(programmaticChecks(shortDraft, { ...ctx60, allowShorter: true }).passed).toBe(true);
+    expect(programmaticChecks(tooShortDraft(), { ...ctx60, allowShorter: true }).passed).toBe(false);
+  });
+});
+
+function tooShortDraft(): ScriptDraft {
+  return { hookStyle: "question", sections: [{ type: "HOOK", text: "Why?" }, { type: "PAYOFF", text: "Gravity squeezes the spine." }], factsUsed: [] };
+}

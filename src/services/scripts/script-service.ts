@@ -65,6 +65,8 @@ export interface ScriptContext {
   includeCta: boolean;
   recentHooks: string[];
   preferredHookStyles?: string[];
+  /** Last resort: accept a script that is shorter than planned (but still a real Short) with a warning. */
+  allowShorter?: boolean;
 }
 
 export interface ValidationIssue {
@@ -121,26 +123,95 @@ function describePacing(pacing: ScriptContext["pacing"]): string {
   }
 }
 
-/** Sentence plan per section: small models follow sentence counts far better than word counts. */
-function sectionPlan(ctx: ScriptContext): string {
+interface SentencePlan {
+  curiosity: number;
+  information: number;
+  escalation: number;
+  payoff: number;
+  cta: boolean;
+}
+
+const HOOK_WORDS = 10;
+const CTA_WORDS = 6;
+
+function wordsPerSentence(ctx: Pick<ScriptContext, "pacing">): number {
+  return ctx.pacing === "fast" ? 9 : 12;
+}
+
+/** Splits a number of body sentences over the sections. */
+function distributeSentences(body: number, cta: boolean): SentencePlan {
+  const total = Math.max(4, Math.min(24, Math.round(body)));
+  const curiosity = Math.max(1, Math.round(total * 0.2));
+  const escalation = Math.max(1, Math.round(total * 0.25));
+  const payoff = Math.max(1, Math.round(total * 0.2));
+  return { curiosity, information: Math.max(1, total - curiosity - escalation - payoff), escalation, payoff, cta };
+}
+
+function planFor(ctx: ScriptContext): SentencePlan {
   const words = targetWordCount(ctx.targetDurationSec, ctx.wordsPerMinute).target;
-  const perSentence = ctx.pacing === "fast" ? 9 : 12;
-  const body = Math.max(3, Math.round((words - 10 - (ctx.includeCta ? 6 : 0)) / perSentence));
-  const curiosity = Math.max(1, Math.round(body * 0.2));
-  const escalation = Math.max(1, Math.round(body * 0.25));
-  const payoff = Math.max(1, Math.round(body * 0.2));
-  const information = Math.max(1, body - curiosity - escalation - payoff);
+  return distributeSentences((words - HOOK_WORDS - (ctx.includeCta ? CTA_WORDS : 0)) / wordsPerSentence(ctx), ctx.includeCta);
+}
+
+/** Sentence plan per section: small models follow sentence counts far better than word counts. */
+function describePlan(plan: SentencePlan, perSentence: number): string {
   return [
     `Section plan (about ${perSentence} words per sentence):`,
     "- HOOK: 1 sentence, max 12 words",
-    `- CURIOSITY: ${curiosity} sentence(s)`,
-    `- INFORMATION: ${information} sentences`,
-    `- ESCALATION: ${escalation} sentence(s)`,
-    `- PAYOFF: ${payoff} sentence(s)`,
-    ctx.includeCta ? "- CTA: 1 short sentence" : "",
+    `- CURIOSITY: ${plan.curiosity} sentence(s)`,
+    `- INFORMATION: ${plan.information} sentences`,
+    `- ESCALATION: ${plan.escalation} sentence(s)`,
+    `- PAYOFF: ${plan.payoff} sentence(s)`,
+    plan.cta ? "- CTA: 1 short sentence" : "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function sectionPlan(ctx: ScriptContext): string {
+  return describePlan(planFor(ctx), wordsPerSentence(ctx));
+}
+
+/**
+ * Output schema with an exact sentence count per section. Local models decode with a
+ * JSON grammar, so fixed-length arrays make the length of the script reliable.
+ */
+function sentenceSchema(plan: SentencePlan) {
+  const sentences = (count: number) => z.array(z.string().describe("One spoken sentence of 8-14 words")).length(count);
+  return z.object({
+    hookStyle: z.enum(HOOK_STYLES),
+    hook: z.string().describe("One hook sentence, max 12 words"),
+    curiosity: sentences(plan.curiosity),
+    information: sentences(plan.information),
+    escalation: sentences(plan.escalation),
+    payoff: sentences(plan.payoff),
+    cta: plan.cta ? z.string().describe("One short call to action") : z.string().optional(),
+    factsUsed: z.array(z.string()),
+  });
+}
+
+type SentenceDraft = z.infer<ReturnType<typeof sentenceSchema>>;
+
+function draftFromSentences(data: SentenceDraft, plan: SentencePlan): ScriptDraft {
+  const join = (parts: string[]) => parts.map((p) => p.trim()).filter(Boolean).join(" ");
+  const sections: ScriptDraft["sections"] = [
+    { type: "HOOK", text: data.hook.trim() },
+    { type: "CURIOSITY", text: join(data.curiosity) },
+    { type: "INFORMATION", text: join(data.information) },
+    { type: "ESCALATION", text: join(data.escalation) },
+    { type: "PAYOFF", text: join(data.payoff) },
+  ];
+  if (plan.cta && data.cta?.trim()) sections.push({ type: "CTA", text: data.cta.trim() });
+  return { hookStyle: data.hookStyle, sections: sections.filter((section) => section.text), factsUsed: data.factsUsed };
+}
+
+/** Re-plans the sentence count from the words per sentence the model actually writes. */
+function replan(ctx: ScriptContext, draft: ScriptDraft): SentencePlan {
+  const body = draft.sections.filter((s) => s.type !== "HOOK" && s.type !== "CTA");
+  const bodyText = body.map((s) => s.text).join(" ");
+  const sentences = Math.max(1, bodyText.split(/(?<=[.!?])\s+/).filter(Boolean).length);
+  const perSentence = Math.max(5, countWords(bodyText) / sentences);
+  const words = targetWordCount(ctx.targetDurationSec, ctx.wordsPerMinute).target;
+  return distributeSentences((words - HOOK_WORDS - (ctx.includeCta ? CTA_WORDS : 0)) / perSentence, ctx.includeCta);
 }
 
 function buildScriptPrompt(ctx: ScriptContext, revision?: { previous: string; issues: string[] }): string {
@@ -185,6 +256,13 @@ function normaliseDraft(draft: ScriptDraft): ScriptDraft {
 }
 
 /** How far a draft's estimated spoken duration is from the target, in seconds. */
+/** Length fitting only makes sense for an English draft; anything else goes to QC and revision. */
+function needsLengthFit(draft: ScriptDraft, ctx: ScriptContext): boolean {
+  const text = fullText(draft);
+  if (!analyzeLanguage(text, "script").isEnglish) return false;
+  return !isWithinDuration(estimateSpeechDurationSec(text, ctx.wordsPerMinute), ctx.targetDurationSec, ctx.tolerancePct);
+}
+
 function durationGap(draft: ScriptDraft, ctx: ScriptContext): number {
   return Math.abs(estimateSpeechDurationSec(fullText(draft), ctx.wordsPerMinute) - ctx.targetDurationSec);
 }
@@ -217,6 +295,7 @@ export async function draftScript(
   revision?: { previous: string; issues: string[] },
   signal?: AbortSignal,
 ): Promise<{ draft: ScriptDraft; usage: AIUsage }> {
+  if (ai.prefersSimpleOutput) return draftWithSentencePlan(ai, ctx, revision, signal);
   const result = await ai.generateStructured({
     purpose: revision ? "script.revise" : "script.generate",
     system: SCRIPT_SYSTEM,
@@ -229,8 +308,7 @@ export async function draftScript(
   let draft = normaliseDraft(result.data);
   // Length fitting: models (especially small local ones) often miss the word budget.
   for (let pass = 0; pass < MAX_FIT_PASSES; pass++) {
-    const estimated = estimateSpeechDurationSec(fullText(draft), ctx.wordsPerMinute);
-    if (isWithinDuration(estimated, ctx.targetDurationSec, ctx.tolerancePct)) break;
+    if (!needsLengthFit(draft, ctx)) break;
     const fitted = await ai.generateStructured({
       purpose: "script.fit",
       system: SCRIPT_SYSTEM,
@@ -239,12 +317,67 @@ export async function draftScript(
       effort: "medium",
       signal,
     });
-    usage.inputTokens += fitted.usage.inputTokens;
-    usage.outputTokens += fitted.usage.outputTokens;
-    usage.webSearches += fitted.usage.webSearches;
-    usage.costUsd += fitted.usage.costUsd;
+    addTo(usage, fitted.usage);
     const candidate = normaliseDraft(fitted.data);
     if (durationGap(candidate, ctx) < durationGap(draft, ctx)) draft = candidate;
+  }
+  return { draft, usage };
+}
+
+function addTo(total: AIUsage, add: AIUsage): void {
+  total.inputTokens += add.inputTokens;
+  total.outputTokens += add.outputTokens;
+  total.webSearches += add.webSearches;
+  total.costUsd += add.costUsd;
+}
+
+/** Small-model drafting: exact sentence counts per section, re-planned until the length fits. */
+async function draftWithSentencePlan(
+  ai: AIProvider,
+  ctx: ScriptContext,
+  revision: { previous: string; issues: string[] } | undefined,
+  signal?: AbortSignal,
+): Promise<{ draft: ScriptDraft; usage: AIUsage }> {
+  let plan = planFor(ctx);
+  const rules = "Fill every sentence slot with one complete spoken sentence of 8-14 words. Do not leave any slot short or empty.";
+  const first = await ai.generateStructured({
+    purpose: revision ? "script.revise" : "script.generate",
+    system: SCRIPT_SYSTEM,
+    prompt: `${buildScriptPrompt(ctx, revision)}\n${rules}`,
+    schema: sentenceSchema(plan),
+    effort: "high",
+    signal,
+  });
+  const usage = { ...first.usage };
+  let draft = normaliseDraft(draftFromSentences(first.data, plan));
+  let latest = draft;
+  for (let pass = 0; pass < MAX_FIT_PASSES; pass++) {
+    if (!needsLengthFit(draft, ctx)) break;
+    // Learn the sentence length from the model's latest output, even if it was not kept.
+    plan = replan(ctx, latest);
+    const words = targetWordCount(ctx.targetDurationSec, ctx.wordsPerMinute);
+    const fitted = await ai.generateStructured({
+      purpose: "script.fit",
+      system: SCRIPT_SYSTEM,
+      prompt: [
+        `Rewrite this YouTube Short script about "${ctx.topicTitle}" so it has ${words.min}-${words.max} words in total (it has ${countWords(fullText(draft))}).`,
+        "Use exactly the number of sentences given for each section below. Keep the hook, the facts and the payoff; add concrete detail where more sentences are needed.",
+        describePlan(plan, wordsPerSentence(ctx)),
+        rules,
+        "",
+        "Research you may rely on (use ONLY these facts):",
+        ...(ctx.research.facts.length ? ctx.research.facts.map((f) => `- ${f}`) : ["- (no verified facts available: keep claims general and clearly hedged)"]),
+        "",
+        "Current script:",
+        ...draft.sections.map((s) => `${s.type}: ${s.text}`),
+      ].join("\n"),
+      schema: sentenceSchema(plan),
+      effort: "medium",
+      signal,
+    });
+    addTo(usage, fitted.usage);
+    latest = normaliseDraft(draftFromSentences(fitted.data, plan));
+    if (durationGap(latest, ctx) < durationGap(draft, ctx)) draft = latest;
   }
   return { draft, usage };
 }
@@ -260,7 +393,15 @@ const FORMATTING_PATTERNS: [RegExp, string][] = [
 ];
 
 /** Deterministic checks that do not need an AI call. */
-export function programmaticChecks(draft: ScriptDraft, ctx: Pick<ScriptContext, "targetDurationSec" | "wordsPerMinute" | "tolerancePct" | "recentHooks">): ScriptValidation {
+/** Shortest script accepted as a last resort (allowShorter). */
+export function minimumAcceptableDurationSec(targetSec: number): number {
+  return Math.max(15, targetSec * 0.6);
+}
+
+export function programmaticChecks(
+  draft: ScriptDraft,
+  ctx: Pick<ScriptContext, "targetDurationSec" | "wordsPerMinute" | "tolerancePct" | "recentHooks" | "allowShorter">,
+): ScriptValidation {
   const text = fullText(draft);
   const issues: ValidationIssue[] = [];
   const wordCount = countWords(text);
@@ -275,9 +416,10 @@ export function programmaticChecks(draft: ScriptDraft, ctx: Pick<ScriptContext, 
   }
   if (!isWithinDuration(estimated, ctx.targetDurationSec, ctx.tolerancePct)) {
     const target = targetWordCount(ctx.targetDurationSec, ctx.wordsPerMinute);
+    const acceptablyShort = ctx.allowShorter && estimated < ctx.targetDurationSec && estimated >= minimumAcceptableDurationSec(ctx.targetDurationSec);
     issues.push({
       check: "duration",
-      severity: "error",
+      severity: acceptablyShort ? "warning" : "error",
       message: `Estimated spoken duration is ${estimated.toFixed(1)}s but the target is ${ctx.targetDurationSec}s (${wordCount} words; use ${target.min}-${target.max} words)`,
     });
   }

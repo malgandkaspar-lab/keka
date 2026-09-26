@@ -173,20 +173,22 @@ export const validateScriptHandler: StepHandler = async (ctx) => {
   for (let attempt = 1; attempt <= vc.settings.maxScriptAttempts; attempt++) {
     await ctx.progress(Math.min(90, attempt * 30), `Quality control pass ${attempt}`);
     const draft = draftFromVersion(version);
-    const { validation, usage } = await validateDraft(ai, draft, scriptCtx, ctx.signal);
+    // Final attempt: a script that is somewhat shorter than planned is better than no video.
+    const lastAttempt = attempt === vc.settings.maxScriptAttempts;
+    const { validation, usage } = await validateDraft(ai, draft, { ...scriptCtx, allowShorter: lastAttempt }, ctx.signal);
     cost += usage?.costUsd ?? 0;
     await updateVersionValidation(version.id, validation);
     if (validation.passed) {
       return {
         provider: ai.name,
         costUsd: cost,
-        message: `Script validation passed (v${version.version}, ~${validation.metrics.estimatedDurationSec.toFixed(1)}s)`,
+        message: `Script validation passed (v${version.version}, ~${validation.metrics.estimatedDurationSec.toFixed(1)}s${validation.issues.some((i) => i.check === "duration") ? `, shorter than the ${scriptCtx.targetDurationSec}s target` : ""})`,
         output: { scriptVersionId: version.id, attempts: attempt, metrics: validation.metrics },
       };
     }
     const problems = validation.issues.filter((i) => i.severity === "error").map((i) => i.message);
     await ctx.log(`Script v${version.version} failed QC: ${problems.join("; ")}`, { level: "WARN" });
-    if (attempt === vc.settings.maxScriptAttempts) break;
+    if (lastAttempt) break;
     const revision = await draftScript(ai, scriptCtx, { previous: fullText(draft), issues: problems }, ctx.signal);
     cost += revision.usage.costUsd;
     version = await saveScriptVersion({
