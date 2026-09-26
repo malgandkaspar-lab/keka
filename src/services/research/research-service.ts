@@ -125,24 +125,29 @@ export async function researchTopic(opts: {
     addUsage(usage, notes.usage);
 
     const sources = notes.sources.map((s) => ({ ...s, reliability: sourceReliability(s.url) }));
-    const extraction = await ai.generateStructured({
-      purpose: "research.extract",
-      system: EXTRACTION_SYSTEM,
-      prompt: [
-        `Topic: ${topic.title}`,
-        "Sources consulted (the only URLs you may cite):",
-        ...sources.map((s) => `- ${s.url} (${s.title})`),
-        "",
-        "Research notes:",
-        notes.notes || "(no notes were produced)",
-      ].join("\n"),
-      schema: researchExtractionSchema,
-      effort: "medium",
-      signal: opts.signal,
-    });
+    const allowedUrls = new Set(sources.map((s) => s.url));
+    const empty: ResearchExtraction = { summary: "", claims: [], sufficient: false, recommendedAngle: topic.angle ?? "", cautions: [] };
+    // Small local models skip the full fact sheet (slow and often empty) and only run the
+    // simpler, verified fact-list pass below.
+    const extraction = ai.prefersSimpleOutput
+      ? { data: empty, usage: { ...usage, inputTokens: 0, outputTokens: 0, webSearches: 0, costUsd: 0 } }
+      : await ai.generateStructured({
+        purpose: "research.extract",
+        system: EXTRACTION_SYSTEM,
+        prompt: [
+          `Topic: ${topic.title}`,
+          "Sources consulted (the only URLs you may cite):",
+          ...sources.map((s) => `- ${s.url} (${s.title})`),
+          "",
+          "Research notes:",
+          notes.notes || "(no notes were produced)",
+        ].join("\n"),
+        schema: researchExtractionSchema,
+        effort: "medium",
+        signal: opts.signal,
+      });
     addUsage(usage, extraction.usage);
 
-    const allowedUrls = new Set(sources.map((s) => s.url));
     let cleaned: ResearchExtraction = {
       ...extraction.data,
       claims: extraction.data.claims.map((c) => ({ ...c, sourceUrls: c.sourceUrls.filter((u) => allowedUrls.has(u)) })),

@@ -178,6 +178,28 @@ describe("research with a weak model", () => {
     expect(outcome.extraction.summary.length).toBeGreaterThan(40);
   });
 
+  it("skips the full fact sheet for small local models", async () => {
+    const user = await createTestUser();
+    const { topic } = await createManualTopic({ userId: user.id, title: "How do astronauts grow taller in orbit?", categoryKey: "space", similarityThreshold: 0.55 });
+    const ai = Object.assign(new FakeAIProvider(), { prefersSimpleOutput: true });
+    ai.researchWithWebSearch = async () => ({
+      notes: "SOURCE: NASA\nNASA reports that astronauts grow up to 3 percent taller in microgravity. Their spinal discs expand without gravity. Height returns to normal within months after landing on Earth. ".repeat(2),
+      sources: [{ url: "https://www.nasa.gov/spine", title: "NASA: Spinal elongation in microgravity" }],
+      usage: { inputTokens: 0, outputTokens: 0, webSearches: 1, costUsd: 0, model: "fake-model" },
+    });
+    ai.overrides["research.facts"] = () => ({
+      facts: [
+        { statement: "Astronauts grow up to 3 percent taller in microgravity.", source: 1 },
+        { statement: "Spinal discs expand without gravity.", source: 1 },
+        { statement: "Height returns to normal within months after landing on Earth.", source: 1 },
+      ],
+    });
+    const outcome = await researchTopic({ topic, ai });
+    expect(ai.calls["research.extract"]).toBeUndefined();
+    expect(outcome.status).toBe("COMPLETED");
+    expect(outcome.extraction.claims).toHaveLength(3);
+  });
+
   it("does not reuse an insufficient cached result", async () => {
     const user = await createTestUser();
     const { topic } = await createManualTopic({ userId: user.id, title: "Why do cats purr so much?", categoryKey: "animals", similarityThreshold: 0.55 });

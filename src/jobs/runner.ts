@@ -5,7 +5,8 @@ import { CancelledError, errorMessage, isRetryable, TimeoutError } from "@/lib/e
 import type { StepJobData } from "@/queues";
 import { logEvent } from "@/services/logging/system-log";
 import { advance, reroute } from "@/services/pipeline/orchestrator";
-import { STEP_DEFINITIONS } from "@/services/pipeline/steps";
+import { STEP_DEFINITIONS, stepTimeoutMs } from "@/services/pipeline/steps";
+import { getUserSettings } from "@/services/settings/settings-service";
 import { STEP_HANDLERS } from "./registry";
 import type { StepContext, StepHandler } from "./types";
 
@@ -60,7 +61,8 @@ export async function processStepJob(job: Job<StepJobData>, options: ProcessOpti
   });
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new TimeoutError(def.jobName, def.timeoutMs)), def.timeoutMs);
+  const timeoutMs = stepTimeoutMs(def, (await getUserSettings(video.userId)).aiProvider);
+  const timeout = setTimeout(() => controller.abort(new TimeoutError(def.jobName, timeoutMs)), timeoutMs);
   const cancelPoll = setInterval(() => {
     void db.video
       .findUnique({ where: { id: videoId }, select: { cancelRequested: true } })

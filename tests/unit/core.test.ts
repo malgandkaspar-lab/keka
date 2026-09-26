@@ -6,7 +6,7 @@ import { parseDecodeLog, evaluateTechnical, evaluateContent } from "@/services/q
 import { buildAudioGraph, buildXfadeGraph, sceneFilter } from "@/services/video/render-engine";
 import { pickBestFile, rankCandidates } from "@/services/footage/footage-service";
 import { planSoundEffects } from "@/jobs/handlers/render";
-import { dependentSteps, GENERATION_STEPS, nextStepAfter } from "@/services/pipeline/steps";
+import { dependentSteps, GENERATION_STEPS, nextStepAfter, STEP_DEFINITIONS, stepTimeoutMs } from "@/services/pipeline/steps";
 import { AuthenticationError, ValidationError } from "@/lib/errors";
 import type { FootageCandidate } from "@/services/footage/types";
 
@@ -127,6 +127,14 @@ describe("footage ranking", () => {
   it("picks the smallest file that covers 1080x1920", () => {
     const file = pickBestFile([{ url: "4k", width: 2160, height: 3840 }, { url: "hd", width: 1080, height: 1920 }, { url: "sd", width: 540, height: 960 }], true);
     expect(file?.url).toBe("hd");
+  });
+});
+
+describe("step timeouts", () => {
+  it("gives AI steps more time on a local model, but not media steps", () => {
+    expect(stepTimeoutMs(STEP_DEFINITIONS.RESEARCH_TOPIC, "ollama")).toBe(STEP_DEFINITIONS.RESEARCH_TOPIC.timeoutMs * 4);
+    expect(stepTimeoutMs(STEP_DEFINITIONS.RESEARCH_TOPIC, "anthropic")).toBe(STEP_DEFINITIONS.RESEARCH_TOPIC.timeoutMs);
+    expect(stepTimeoutMs(STEP_DEFINITIONS.RENDER_VIDEO, "ollama")).toBe(STEP_DEFINITIONS.RENDER_VIDEO.timeoutMs);
   });
 });
 

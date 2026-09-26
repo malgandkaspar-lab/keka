@@ -16,24 +16,26 @@ export interface StepDefinition {
   doneMessage: string;
   timeoutMs: number;
   attempts: number;
+  /** Calls the text AI; given more time when it runs on the local CPU (see localAiTimeoutMs). */
+  usesAI?: boolean;
 }
 
 const MIN = 60_000;
 
 export const STEP_DEFINITIONS: Record<PipelineStep, StepDefinition> = {
-  GENERATE_TOPIC: { step: "GENERATE_TOPIC", jobName: "generate-topic", queue: "pipeline", status: "TOPIC_GENERATING", label: "Generating topic...", doneMessage: "Topic generated", timeoutMs: 5 * MIN, attempts: 3 },
-  RESEARCH_TOPIC: { step: "RESEARCH_TOPIC", jobName: "research-topic", queue: "pipeline", status: "RESEARCHING", label: "Researching...", doneMessage: "Research completed", timeoutMs: 10 * MIN, attempts: 3 },
-  GENERATE_SCRIPT: { step: "GENERATE_SCRIPT", jobName: "generate-script", queue: "pipeline", status: "SCRIPT_GENERATING", label: "Writing script...", doneMessage: "Script generated", timeoutMs: 8 * MIN, attempts: 3 },
-  VALIDATE_SCRIPT: { step: "VALIDATE_SCRIPT", jobName: "validate-script", queue: "pipeline", status: "SCRIPT_REVIEW", label: "Validating script...", doneMessage: "Script validation passed", timeoutMs: 20 * MIN, attempts: 3 },
+  GENERATE_TOPIC: { step: "GENERATE_TOPIC", jobName: "generate-topic", queue: "pipeline", status: "TOPIC_GENERATING", label: "Generating topic...", doneMessage: "Topic generated", timeoutMs: 5 * MIN, attempts: 3, usesAI: true },
+  RESEARCH_TOPIC: { step: "RESEARCH_TOPIC", jobName: "research-topic", queue: "pipeline", status: "RESEARCHING", label: "Researching...", doneMessage: "Research completed", timeoutMs: 10 * MIN, attempts: 3, usesAI: true },
+  GENERATE_SCRIPT: { step: "GENERATE_SCRIPT", jobName: "generate-script", queue: "pipeline", status: "SCRIPT_GENERATING", label: "Writing script...", doneMessage: "Script generated", timeoutMs: 8 * MIN, attempts: 3, usesAI: true },
+  VALIDATE_SCRIPT: { step: "VALIDATE_SCRIPT", jobName: "validate-script", queue: "pipeline", status: "SCRIPT_REVIEW", label: "Validating script...", doneMessage: "Script validation passed", timeoutMs: 20 * MIN, attempts: 3, usesAI: true },
   GENERATE_VOICE: { step: "GENERATE_VOICE", jobName: "generate-voice", queue: "pipeline", status: "VOICE_GENERATING", label: "Generating voice...", doneMessage: "Voice generated", timeoutMs: 8 * MIN, attempts: 3 },
-  PLAN_VISUALS: { step: "PLAN_VISUALS", jobName: "plan-visuals", queue: "pipeline", status: "MEDIA_SEARCHING", label: "Planning visuals...", doneMessage: "Visual plan created", timeoutMs: 5 * MIN, attempts: 3 },
+  PLAN_VISUALS: { step: "PLAN_VISUALS", jobName: "plan-visuals", queue: "pipeline", status: "MEDIA_SEARCHING", label: "Planning visuals...", doneMessage: "Visual plan created", timeoutMs: 5 * MIN, attempts: 3, usesAI: true },
   SEARCH_FOOTAGE: { step: "SEARCH_FOOTAGE", jobName: "search-footage", queue: "pipeline", status: "MEDIA_SEARCHING", label: "Finding footage...", doneMessage: "Footage found", timeoutMs: 10 * MIN, attempts: 3 },
   SELECT_FOOTAGE: { step: "SELECT_FOOTAGE", jobName: "select-footage", queue: "pipeline", status: "MEDIA_SEARCHING", label: "Downloading footage...", doneMessage: "Footage selected", timeoutMs: 20 * MIN, attempts: 3 },
   GENERATE_SUBTITLES: { step: "GENERATE_SUBTITLES", jobName: "generate-subtitles", queue: "pipeline", status: "SUBTITLES_GENERATING", label: "Generating subtitles...", doneMessage: "Subtitles generated", timeoutMs: 8 * MIN, attempts: 3 },
   SELECT_MUSIC: { step: "SELECT_MUSIC", jobName: "select-music", queue: "pipeline", status: "EDITING", label: "Choosing music...", doneMessage: "Music selected", timeoutMs: 5 * MIN, attempts: 3 },
   RENDER_VIDEO: { step: "RENDER_VIDEO", jobName: "render-video", queue: "render", status: "RENDERING", label: "Rendering...", doneMessage: "Video rendered", timeoutMs: 45 * MIN, attempts: 3 },
   QUALITY_CHECK: { step: "QUALITY_CHECK", jobName: "quality-check", queue: "render", status: "QUALITY_CHECK", label: "Quality checking...", doneMessage: "Quality check passed", timeoutMs: 15 * MIN, attempts: 3 },
-  GENERATE_METADATA: { step: "GENERATE_METADATA", jobName: "generate-metadata", queue: "pipeline", status: "QUALITY_CHECK", label: "Generating metadata...", doneMessage: "Metadata generated", timeoutMs: 5 * MIN, attempts: 3 },
+  GENERATE_METADATA: { step: "GENERATE_METADATA", jobName: "generate-metadata", queue: "pipeline", status: "QUALITY_CHECK", label: "Generating metadata...", doneMessage: "Metadata generated", timeoutMs: 5 * MIN, attempts: 3, usesAI: true },
   GENERATE_THUMBNAIL: { step: "GENERATE_THUMBNAIL", jobName: "generate-thumbnail", queue: "render", status: "QUALITY_CHECK", label: "Creating thumbnail...", doneMessage: "Thumbnail created", timeoutMs: 5 * MIN, attempts: 3 },
   CONTENT_QA: { step: "CONTENT_QA", jobName: "content-qa", queue: "pipeline", status: "QUALITY_CHECK", label: "Final English QA...", doneMessage: "Final English QA passed", timeoutMs: 2 * MIN, attempts: 3 },
   YOUTUBE_UPLOAD: { step: "YOUTUBE_UPLOAD", jobName: "youtube-upload", queue: "publish", status: "UPLOADING", label: "Uploading...", doneMessage: "Uploaded to YouTube", timeoutMs: 60 * MIN, attempts: 5 },
@@ -131,3 +133,10 @@ export const PROCESSING_STATUSES: VideoStatus[] = [
   "QUALITY_CHECK",
   "UPLOADING",
 ];
+
+/** A local model on a CPU is several times slower than a cloud API. */
+export const LOCAL_AI_TIMEOUT_FACTOR = 4;
+
+export function stepTimeoutMs(def: StepDefinition, aiProvider: string): number {
+  return def.usesAI && aiProvider === "ollama" ? def.timeoutMs * LOCAL_AI_TIMEOUT_FACTOR : def.timeoutMs;
+}

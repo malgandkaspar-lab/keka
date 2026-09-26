@@ -59,6 +59,8 @@ export interface ResearchResult {
 export interface AIProvider {
   readonly name: string;
   readonly model: string;
+  /** Small local model: callers should prefer fewer, simpler structured requests. */
+  readonly prefersSimpleOutput?: boolean;
   generateStructured<S extends z.ZodType>(request: StructuredRequest<S>): Promise<StructuredResult<z.infer<S>>>;
   researchWithWebSearch(request: ResearchRequest): Promise<ResearchResult>;
 }

@@ -33,6 +33,7 @@ const chatResponseSchema = z.object({
 
 export class OllamaProvider implements AIProvider {
   readonly name = PROVIDER;
+  readonly prefersSimpleOutput = true;
 
   constructor(
     readonly model: string,
