@@ -48,7 +48,10 @@ export function sanitizeMetadata(raw: VideoMetadata): VideoMetadata {
   let title = raw.title.replace(/\s+/g, " ").replace(/^["'“]+|["'”]+$/g, "").trim();
   if (title.length > 100) title = `${title.slice(0, 97).replace(/\s+\S*$/, "")}...`;
 
-  const hashtags = [...new Set(raw.hashtags.map(normalizeHashtag).filter((h): h is string => Boolean(h)))];
+  const hashtags: string[] = [];
+  for (const tag of raw.hashtags.map(normalizeHashtag)) {
+    if (tag && !hashtags.some((h) => h.toLowerCase() === tag.toLowerCase())) hashtags.push(tag);
+  }
   if (!hashtags.some((h) => h.toLowerCase() === "#shorts")) hashtags.push("#Shorts");
   const limitedHashtags = hashtags.slice(0, 5);
 

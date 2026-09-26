@@ -17,7 +17,6 @@ import { processMaintenanceJob, registerMaintenanceSchedules } from "./maintenan
  * enqueues jobs; this process executes them with per-queue concurrency, BullMQ stalled
  * job recovery (lockDuration) and graceful shutdown on SIGTERM/SIGINT.
  */
-process.env.SERVICE_NAME ??= "shorts-factory-worker";
 const log = createLogger({ module: "worker" });
 
 async function main(): Promise<void> {

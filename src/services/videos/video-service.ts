@@ -16,6 +16,8 @@ import { createManualTopic } from "@/services/topics/topic-service";
 export const createVideoSchema = z
   .object({
     topic: z.string().trim().max(200).optional().nullable(),
+    /** A topic previously suggested by the AI (Generate page "suggest"). */
+    topicId: z.string().uuid().optional().nullable(),
     autoTopic: z.boolean().default(false),
     category: z.string().min(1).optional(),
     durationSec: z.number().int().min(10).max(180).optional(),
@@ -60,7 +62,11 @@ export async function createVideo(userId: string, input: CreateVideoInput, optio
 
   let topicId: string | null = null;
   let similarTopic: string | null = null;
-  if (!data.autoTopic && data.topic) {
+  const suggested = data.topicId && !data.autoTopic ? await db.topic.findFirst({ where: { id: data.topicId, userId, status: "PROPOSED" } }) : null;
+  if (suggested && suggested.title === data.topic) {
+    topicId = suggested.id;
+    await db.topic.update({ where: { id: suggested.id }, data: { status: "USED" } });
+  } else if (!data.autoTopic && data.topic) {
     const manual = await createManualTopic({ userId, projectId: project.id, title: data.topic, categoryKey: category, similarityThreshold: settings.topicSimilarityThreshold });
     topicId = manual.topic.id;
     similarTopic = manual.similarTo;
@@ -77,7 +83,7 @@ export async function createVideo(userId: string, input: CreateVideoInput, optio
       scheduleId: options.scheduleId ?? null,
       requestedTopic: data.topic ?? null,
       autoTopic: data.autoTopic,
-      category,
+      category: suggested?.category ?? category,
       targetDurationSec: data.durationSec ?? settings.defaultDurationSec,
       voicePresetId: voicePresetId ?? null,
       musicMode: data.musicMode ?? settings.defaultMusicMode,
@@ -88,7 +94,7 @@ export async function createVideo(userId: string, input: CreateVideoInput, optio
       sfxEnabled: settings.sfxEnabled,
     },
   });
-  if (topicId) await markStepSkipped(video.id, userId, "GENERATE_TOPIC", "manual topic");
+  if (topicId) await markStepSkipped(video.id, userId, "GENERATE_TOPIC", suggested ? "AI-suggested topic" : "manual topic");
   await logEvent({
     userId,
     videoId: video.id,

@@ -155,7 +155,7 @@ export async function downloadCandidate(opts: {
   const buffer = await opts.provider.download(file.url, opts.signal);
 
   return withWorkDir("footage", async (dir) => {
-    const localPath = path.join(dir, `${candidate.id}.${extension}`);
+    const localPath = path.join(/*turbopackIgnore: true*/ dir, `${candidate.id}.${extension}`);
     await writeFile(localPath, buffer);
     return storeAsset({
       userId: opts.userId,

@@ -1,0 +1,91 @@
+# Complete development / single-host production stack:
+#   docker compose up --build
+# then open http://localhost:3000 and create the admin account.
+name: shorts-factory
+
+x-app: &app
+  build: .
+  image: shorts-factory:latest
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://shorts:${POSTGRES_PASSWORD:-shorts}@postgres:5432/shorts_factory
+    REDIS_URL: redis://redis:6379
+    STORAGE_LOCAL_DIR: /app/storage
+    WORK_DIR: /app/storage/tmp
+  volumes:
+    - media:/app/storage
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shorts
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shorts}
+      POSTGRES_DB: shorts_factory
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shorts -d shorts_factory"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # AOF persistence so queued jobs survive Redis restarts; BullMQ requires noeviction.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    <<: *app
+    command: ["web"]
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    environment:
+      DATABASE_URL: postgresql://shorts:${POSTGRES_PASSWORD:-shorts}@postgres:5432/shorts_factory
+      REDIS_URL: redis://redis:6379
+      STORAGE_LOCAL_DIR: /app/storage
+      WORK_DIR: /app/storage/tmp
+      SERVICE_NAME: shorts-factory-worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 2m
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
