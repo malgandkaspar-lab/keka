@@ -52,7 +52,15 @@ Write-Host ".env is ready."
 if ($NoStart) { exit 0 }
 
 Write-Host "Starting Shorts Factory (the first start downloads about 6 GB, this can take a while)..."
+$ErrorActionPreference = "Continue"
 docker compose up -d --build
+$composeOk = $LASTEXITCODE -eq 0
+$ErrorActionPreference = "Stop"
+if (-not $composeOk) {
+  Write-Host ""
+  Write-Host "Starting failed (see the error above). Fix it and run setup again - your .env is kept."
+  exit 1
+}
 Write-Host ""
 Write-Host "Done. Open http://localhost:3000 in your browser and create your account."
 Write-Host "The AI model keeps downloading in the background: docker compose logs -f ollama-pull"
