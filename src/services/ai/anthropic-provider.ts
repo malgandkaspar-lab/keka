@@ -36,6 +36,12 @@ const REQUEST_TIMEOUT_MS = 5 * 60_000;
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const log = createLogger({ module: "ai.anthropic" });
 
+/**
+ * Claude models this provider can drive: they must support adaptive thinking and the
+ * web_search_20260209 tool (Haiku 4.5 supports neither).
+ */
+export const CLAUDE_TEXT_MODELS = ["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1"] as const;
+
 function supportsServerFallbacks(model: string): boolean {
   return /^claude-(opus-5|fable-5)/.test(model);
 }

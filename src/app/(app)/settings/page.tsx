@@ -4,7 +4,7 @@ import { SubtitleStyleEditor } from "@/components/forms/subtitle-style-editor";
 import { listCustomSubtitleStyles, SUBTITLE_FONTS } from "@/services/subtitles/style-service";
 import { PageHeader } from "@/components/ui/primitives";
 import { credentialStatus } from "@/config/env";
-import { AI_MODEL_PRICING } from "@/config/pricing";
+import { CLAUDE_TEXT_MODELS } from "@/services/ai/anthropic-provider";
 import { SUBTITLE_STYLE_PRESETS } from "@/config/templates";
 import { requirePageUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -37,7 +37,7 @@ export default async function SettingsPage() {
             templates: templates.map((t) => ({ key: t.key, name: t.name })),
             subtitleStyles: [...Object.values(SUBTITLE_STYLE_PRESETS), ...customStyles].map((s) => ({ key: s.key, name: s.name })),
             moods: Object.keys(MOOD_PROFILES),
-            aiModels: Object.keys(AI_MODEL_PRICING),
+            aiModels: [...CLAUDE_TEXT_MODELS],
           }}
         />
         <SubtitleStyleEditor fonts={SUBTITLE_FONTS} custom={customStyles} base={SUBTITLE_STYLE_PRESETS.fast_viral!} />
