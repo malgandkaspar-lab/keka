@@ -299,6 +299,10 @@ export class FakeYouTubeProvider implements YouTubeProvider {
   client(): YouTubeClient {
     return this.client_;
   }
+  revoked: string[] = [];
+  async revokeToken(token: string): Promise<void> {
+    this.revoked.push(token);
+  }
 }
 
 export function streamOf(buffer: Buffer): Readable {

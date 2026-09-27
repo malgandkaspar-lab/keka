@@ -8,13 +8,14 @@ import { authenticate, createSession, registerUser, revokeSession, validateSessi
 import { getUserSettings, updateUserSettings } from "@/services/settings/settings-service";
 import { createVideo } from "@/services/videos/video-service";
 import { runDueSchedules, saveSchedule } from "@/services/publishing/scheduler-service";
-import { connectAccount, setYouTubeProviderForTesting } from "@/services/youtube/youtube-service";
+import { connectAccount, disconnectAccount, setYouTubeProviderForTesting } from "@/services/youtube/youtube-service";
 import { editMetadata, editScript } from "@/services/videos/manual-edits";
 import { createManualTopic } from "@/services/topics/topic-service";
 import { rateLimit } from "@/lib/rate-limit";
 import { createTestUser, resetDatabase } from "../helpers/db";
 import { FakeAIProvider, FakeYouTubeProvider } from "../helpers/fakes";
 import { researchTopic } from "@/services/research/research-service";
+import { purgeStaleYouTubeData } from "@/services/analytics/analytics-service";
 
 beforeEach(async () => {
   await resetDatabase();
@@ -128,6 +129,48 @@ describe("YouTube connection", () => {
     } finally {
       setYouTubeProviderForTesting(undefined);
     }
+  });
+});
+
+describe("YouTube disconnect", () => {
+  it("revokes the grant at Google and removes the channel, even if revocation fails", async () => {
+    const user = await createTestUser();
+    const provider = new FakeYouTubeProvider();
+    setYouTubeProviderForTesting(provider);
+    try {
+      const account = await connectAccount(user.id, "auth-code");
+      await disconnectAccount(user.id, account.id);
+      expect(provider.revoked).toEqual(["fake-refresh"]);
+      expect(await db.youTubeAccount.count({ where: { userId: user.id } })).toBe(0);
+
+      const again = await connectAccount(user.id, "auth-code");
+      provider.revokeToken = async () => {
+        throw new Error("invalid_token");
+      };
+      await disconnectAccount(user.id, again.id);
+      expect(await db.youTubeAccount.count({ where: { userId: user.id } })).toBe(0);
+    } finally {
+      setYouTubeProviderForTesting(undefined);
+    }
+  });
+});
+
+describe("YouTube data retention", () => {
+  it("deletes analytics snapshots and insights older than 30 days", async () => {
+    const user = await createTestUser();
+    const { video } = await createVideo(user.id, { topic: "Why do astronauts grow taller in space?", category: "space", durationSec: 30 }, { start: false });
+    const day = 86400_000;
+    const snapshot = (daysAgo: number) => ({ videoId: video.id, youtubeVideoId: "yt1", views: 10, capturedAt: new Date(Date.now() - daysAgo * day) });
+    await db.analyticsSnapshot.createMany({ data: [snapshot(31), snapshot(2)] });
+    await db.performanceInsight.createMany({
+      data: [
+        { userId: user.id, dimension: "category", value: "space", sampleSize: 3, avgViews: 10, score: 1, computedAt: new Date(Date.now() - 40 * day) },
+        { userId: user.id, dimension: "category", value: "history", sampleSize: 3, avgViews: 10, score: 1 },
+      ],
+    });
+    expect(await purgeStaleYouTubeData()).toEqual({ snapshots: 1, insights: 1 });
+    expect(await db.analyticsSnapshot.count({ where: { videoId: video.id } })).toBe(1);
+    expect((await db.performanceInsight.findMany({ where: { userId: user.id } })).map((i) => i.value)).toEqual(["history"]);
   });
 });
 

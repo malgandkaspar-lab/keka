@@ -89,6 +89,8 @@ export interface YouTubeProvider {
   exchangeCode(code: string): Promise<OAuthTokens>;
   /** A client acting on behalf of an account; `onTokens` persists refreshed tokens. */
   client(tokens: OAuthTokens, onTokens: (tokens: Partial<OAuthTokens>) => Promise<void>): YouTubeClient;
+  /** Revokes the app's access at Google (the refresh token revokes the whole grant). */
+  revokeToken(token: string): Promise<void>;
 }
 
 export const YOUTUBE_SCOPES = [

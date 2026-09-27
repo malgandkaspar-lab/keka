@@ -29,9 +29,12 @@ export async function collectAnalyticsForUser(userId: string): Promise<number> {
       where: { userId, youtubeAccountId: account.id, youtubeVideoId: { not: null } },
       select: { id: true, youtubeVideoId: true, uploadedAt: true, status: true, scheduledPublishAt: true },
     });
-    if (videos.length === 0) continue;
     try {
       const client = await clientForAccount(account);
+      // Keep stored channel details fresh (YouTube API data must be refreshed within 30 days).
+      const channel = await client.getChannel();
+      await db.youTubeAccount.update({ where: { id: account.id }, data: { channelTitle: channel.title, channelThumbnail: channel.thumbnailUrl ?? null } });
+      if (videos.length === 0) continue;
       const stats = await client.getStatistics(videos.map((v) => v.youtubeVideoId!));
       const hasAnalyticsScope = account.scopes.some((s) => s.includes("yt-analytics"));
       for (const video of videos) {
@@ -73,6 +76,19 @@ export async function collectAnalyticsForUser(userId: string): Promise<number> {
   }
   if (snapshots > 0) await refreshInsights(userId);
   return snapshots;
+}
+
+/** YouTube API Services Developer Policies: stored API data is refreshed or deleted within 30 days. */
+export const YOUTUBE_DATA_RETENTION_DAYS = 30;
+
+/** Deletes analytics snapshots and derived insights older than the retention window. */
+export async function purgeStaleYouTubeData(now = new Date()): Promise<{ snapshots: number; insights: number }> {
+  const cutoff = new Date(now.getTime() - YOUTUBE_DATA_RETENTION_DAYS * 86400_000);
+  const [snapshots, insights] = await db.$transaction([
+    db.analyticsSnapshot.deleteMany({ where: { capturedAt: { lt: cutoff } } }),
+    db.performanceInsight.deleteMany({ where: { computedAt: { lt: cutoff } } }),
+  ]);
+  return { snapshots: snapshots.count, insights: insights.count };
 }
 
 export async function collectAllAnalytics(): Promise<number> {

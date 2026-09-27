@@ -282,6 +282,14 @@ export class GoogleYouTubeProvider implements YouTubeProvider {
     }
   }
 
+  async revokeToken(token: string): Promise<void> {
+    try {
+      await this.oauthClient().revokeToken(token);
+    } catch (error) {
+      throw mapGoogleError(error, "oauth token revoke");
+    }
+  }
+
   client(tokens: OAuthTokens, onTokens: (tokens: Partial<OAuthTokens>) => Promise<void>): YouTubeClient {
     const auth = this.oauthClient();
     auth.setCredentials({

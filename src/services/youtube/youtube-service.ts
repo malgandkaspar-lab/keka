@@ -4,7 +4,10 @@ import { db } from "@/lib/db";
 import { decryptSecret, encryptSecret, hmacSha256, randomToken, safeEqual } from "@/lib/crypto";
 import { AuthenticationError, ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { GoogleYouTubeProvider } from "./google-provider";
+import { createLogger } from "@/lib/logger";
 import type { OAuthTokens, YouTubeClient, YouTubeProvider } from "./types";
+
+const log = createLogger({ module: "youtube" });
 
 /**
  * YouTubeService
@@ -152,6 +155,14 @@ export async function disconnectAccount(userId: string, accountId: string): Prom
   if (!account) throw new NotFoundError("YouTube account", accountId);
   const pending = await db.publishJob.count({ where: { youtubeAccountId: accountId, status: { in: ["PENDING", "UPLOADING"] } } });
   if (pending) throw new ConflictError("This channel has uploads in progress");
+  // Revoke the grant at Google too (Google API Services User Data Policy). A token that is
+  // already expired or revoked must not block removing the channel from the app.
+  const token = account.refreshTokenEnc ?? account.accessTokenEnc;
+  try {
+    await getYouTubeProvider().revokeToken(decryptSecret(token));
+  } catch (error) {
+    log.warn({ accountId, err: (error as Error).message }, "could not revoke the Google grant; removing the channel anyway");
+  }
   await db.youTubeAccount.delete({ where: { id: accountId } });
 }
 

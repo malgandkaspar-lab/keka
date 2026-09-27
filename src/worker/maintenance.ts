@@ -1,6 +1,6 @@
 import type { Job } from "bullmq";
 import { getQueue } from "@/queues";
-import { collectAllAnalytics, collectAnalyticsForUser, promoteScheduledVideos } from "@/services/analytics/analytics-service";
+import { collectAllAnalytics, collectAnalyticsForUser, promoteScheduledVideos, purgeStaleYouTubeData } from "@/services/analytics/analytics-service";
 import { purgeExpiredSessions } from "@/services/auth/auth-service";
 import { purgeExpiredCache } from "@/services/cache/api-cache";
 import { reconcilePipeline } from "@/services/pipeline/recovery";
@@ -12,7 +12,7 @@ import { repairScheduleTimes, runDueSchedules } from "@/services/publishing/sche
  *  - scheduler-tick (every minute): run due automatic-mode schedules
  *  - collect-analytics (every 6 hours): YouTube statistics/analytics snapshots
  *  - reconcile (every 5 minutes): recover interrupted pipeline state
- *  - cleanup (daily): expired sessions and cache entries
+ *  - cleanup (daily): expired sessions and cache entries, YouTube data older than 30 days
  */
 export const MAINTENANCE_JOBS = {
   "scheduler-tick": { every: 60_000 },
@@ -41,7 +41,7 @@ export async function processMaintenanceJob(job: Job): Promise<Record<string, un
     case "reconcile":
       return { ...(await reconcilePipeline()) };
     case "cleanup":
-      return { sessions: await purgeExpiredSessions(), cache: await purgeExpiredCache() };
+      return { sessions: await purgeExpiredSessions(), cache: await purgeExpiredCache(), youtube: await purgeStaleYouTubeData() };
     case "collect-analytics-user":
       return { snapshots: await collectAnalyticsForUser((job.data as { userId: string }).userId) };
     default:
