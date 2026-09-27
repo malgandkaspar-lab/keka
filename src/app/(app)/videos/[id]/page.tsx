@@ -42,6 +42,7 @@ export default async function VideoPage(props: PageProps<"/videos/[id]">) {
   const uploaded = Boolean(video.youtubeVideoId);
   const renderUrl = mediaUrl(video.renderAsset?.storageKey);
   const thumbnailUrl = mediaUrl(video.thumbnailAsset?.storageKey);
+  const downloadName = (video.title ?? video.topic?.title ?? "short").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "short";
   const script = video.script?.currentVersion;
   const quality = video.qualityReport as QualityReportView | null;
   const title = video.title ?? video.topic?.title ?? video.requestedTopic ?? "Automatic topic";
@@ -80,6 +81,18 @@ export default async function VideoPage(props: PageProps<"/videos/[id]">) {
                 )}
               </div>
               <p className="text-xs text-zinc-500">Estimated cost: {formatUsd(video.costEstimateUsd)}</p>
+              {renderUrl && (
+                <div className="flex flex-wrap gap-3 pt-1">
+                  <a href={renderUrl} download={`${downloadName}.mp4`} className="text-sm font-medium text-indigo-400 hover:text-indigo-300">
+                    Download MP4
+                  </a>
+                  {thumbnailUrl && (
+                    <a href={thumbnailUrl} download={`${downloadName}-thumbnail.jpg`} className="text-sm text-zinc-400 hover:text-white">
+                      Download thumbnail
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </Card>
           {thumbnailUrl && (
