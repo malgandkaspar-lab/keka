@@ -1,4 +1,4 @@
 *.sh text eol=lf
 .env.example text eol=lf
 docker/entrypoint.sh text eol=lf
-setup.cmd text eol=crlf
+*.cmd text eol=crlf

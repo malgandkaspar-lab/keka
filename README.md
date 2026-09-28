@@ -98,6 +98,8 @@ Paid providers are optional and can be selected per user in **Settings**.
 ./setup.sh          # macOS / Linux
 ```
 
+To start it again later (for example after a restart), double-click **`start.cmd`** on Windows or run `docker compose up -d`.
+
 On Windows, double-click **`setup.cmd`** in the project folder (or run `powershell -ExecutionPolicy Bypass -File .\setup.ps1`; plain `.\setup.ps1` is blocked by the default PowerShell script policy).
 
 The script creates `.env` with freshly generated secrets, asks for your free Pexels key and starts everything. Then open <http://localhost:3000>.
