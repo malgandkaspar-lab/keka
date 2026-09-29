@@ -12,11 +12,14 @@ import { LanguageValidationError, ValidationError } from "@/lib/errors";
  * thumbnail text for a finished Short, then enforce YouTube limits and English-only
  * output programmatically. Regenerates (with the failure reasons) when a check fails.
  *
- * Limits enforced: title <= 100 chars (aim <= 70), description <= 5000 chars,
+ * Limits enforced: title <= 50 chars (YouTube allows 100), description <= 5000 chars,
  * 3-5 hashtags including #Shorts, tags total <= 500 chars, thumbnail text <= 5 words.
  */
+/** Short titles read fully in the Shorts feed; YouTube itself allows 100 characters. */
+export const TITLE_MAX_CHARS = 50;
+
 export const metadataSchema = z.object({
-  title: z.string(),
+  title: z.string().describe(`Max ${TITLE_MAX_CHARS} characters`),
   description: z.string(),
   hashtags: z.array(z.string()),
   tags: z.array(z.string()),
@@ -33,7 +36,7 @@ export interface MetadataContext {
 }
 
 const SYSTEM = `You write YouTube Shorts metadata that earns clicks honestly.
-Titles are concise (ideally under 60 characters), create curiosity and accurately represent the video.
+Titles are short (max 50 characters), spark curiosity without giving the whole fact away, and accurately represent the video.
 No misleading clickbait, no ALL CAPS titles, no emoji spam.
 ${ENGLISH_ONLY_PROMPT}
 ${CONTENT_POLICY_PROMPT}`;
@@ -87,6 +90,7 @@ export function checkMetadata(meta: VideoMetadata, recentTitles: string[]): Meta
   const thumb = analyzeLanguage(meta.thumbnailText, "thumbnail");
   if (meta.thumbnailText && !thumb.isEnglish) reasons.push(`thumbnail text not English (${thumb.reasons.join("; ")})`);
   if (meta.title.length < 10) reasons.push("title is too short");
+  if (meta.title.length > TITLE_MAX_CHARS) reasons.push(`title is ${meta.title.length} characters; it must be at most ${TITLE_MAX_CHARS}`);
   if (meta.title === meta.title.toUpperCase() && /[A-Z]{6,}/.test(meta.title)) reasons.push("title is all caps");
   if (meta.description.length < 60) reasons.push("description is too short");
   const policy = checkContentPolicy(`${meta.title} ${meta.description}`);
@@ -113,7 +117,7 @@ export async function generateMetadata(
         `Create YouTube Shorts metadata for this video (category: ${ctx.categoryName}).`,
         `Topic: ${ctx.topicTitle}`,
         `Narration script:\n"""${ctx.script}"""`,
-        "Title: concise, curiosity-driven, accurate. Description: 2-4 natural sentences summarising the video,",
+        `Title: max ${TITLE_MAX_CHARS} characters; it makes people curious but does not reveal the whole fact. Accurate, no clickbait. Description: 2-4 natural sentences summarising the video,`,
         "then one line inviting viewers to follow for more. Hashtags: 3-5 relevant CamelCase hashtags including #Shorts.",
         "Tags: 8-15 relevant search keywords. Thumbnail text: 2-5 words.",
         ctx.recentTitles.length ? `Do not reuse these existing titles:\n- ${ctx.recentTitles.slice(0, 30).join("\n- ")}` : "",

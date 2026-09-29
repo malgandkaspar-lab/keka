@@ -40,7 +40,7 @@ Each major service with its purpose, inputs, outputs, errors, provider, configur
 
 ## ScriptService - `scripts/`
 
-- **Purpose:** Shorts-optimised scripts (hook, curiosity, information, escalation, payoff, optional CTA) that fit the target duration.
+- **Purpose:** one-fact Shorts scripts: HOOK (the fact itself, max 12 words, no intro, not a question) -> CURIOSITY (one surprising detail) -> INFORMATION (2-3 sentences on why) -> CTA (an easy question for viewers), 60-90 words. Titles are at most 50 characters; videos use 5-7 scenes.
 - **Duration:** `estimateSpeechDurationSec(text, wpm)` counts spoken numbers and adds pauses. `targetWordCount(duration, wpm)` gives the word budget.
 - **QC:** `programmaticChecks` covers English, duration, hook length, conclusion, repetition, long sentences, formatting (stage directions, emojis, URLs, hashtags), content policy and reused hooks. `reviewScript` (AI) covers grammar, factual consistency against research, unsupported claims, misleading hooks and scores.
 - **Outputs:** versioned `ScriptVersion` rows (`AI`, `AI_REVISION`, `MANUAL`) with their validation report.

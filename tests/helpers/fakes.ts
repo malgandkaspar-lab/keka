@@ -30,14 +30,15 @@ import { estimateSpeechDurationSec } from "@/services/scripts/duration";
 const usage = (model = "fake-model"): AIUsage => ({ inputTokens: 1000, outputTokens: 500, webSearches: 0, costUsd: 0.01, model });
 
 export const ASTRONAUT_SCRIPT = {
-  hookStyle: "question" as const,
+  hookStyle: "unexpected_fact" as const,
   sections: [
-    { type: "HOOK" as const, text: "Why do astronauts come home taller?" },
-    { type: "CURIOSITY" as const, text: "It sounds impossible, but it happens on almost every long mission." },
-    { type: "INFORMATION" as const, text: "On Earth, gravity squeezes the soft discs between your vertebrae all day long." },
-    { type: "ESCALATION" as const, text: "In orbit, that pressure vanishes, so the discs relax and the spine stretches by up to three percent." },
-    { type: "PAYOFF" as const, text: "That can add about two inches, but gravity takes it back within months of landing." },
-    { type: "CTA" as const, text: "Follow for more space facts." },
+    { type: "HOOK" as const, text: "Astronauts come home up to two inches taller." },
+    { type: "CURIOSITY" as const, text: "And it happens on almost every long mission to the space station." },
+    {
+      type: "INFORMATION" as const,
+      text: "On Earth, gravity squeezes the soft discs between your vertebrae all day long. In orbit, that pressure disappears, so the discs relax and the spine stretches by about three percent. Back on the ground, gravity slowly squeezes them back within months.",
+    },
+    { type: "CTA" as const, text: "Would you want to be taller for a few months?" },
   ],
   factsUsed: ["Astronauts can grow up to 3% taller in microgravity"],
 };
@@ -94,6 +95,8 @@ export class FakeAIProvider implements AIProvider {
           unsupportedClaims: [],
           inappropriateContent: false,
           misleadingHook: false,
+          singleFact: true,
+          hookStatesFact: true,
           hookScore: 8,
           conclusionScore: 8,
           shortsSuitabilityScore: 9,

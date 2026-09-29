@@ -95,6 +95,7 @@ describe("metadata", () => {
     expect(checkMetadata(good, []).passed).toBe(true);
     expect(checkMetadata({ ...good, title: "Miks astronaudid kosmoses pikemaks kasvavad" }, []).passed).toBe(false);
     expect(checkMetadata({ ...good, title: "ASTRONAUTS GROW TALLER IN SPACE" }, []).passed).toBe(false);
+    expect(checkMetadata({ ...good, title: "Why astronauts come home up to two inches taller after space" }, []).reasons.join()).toMatch(/at most 50/);
     expect(checkMetadata(good, ["Why Astronauts Come Home Taller"]).passed).toBe(false);
   });
 

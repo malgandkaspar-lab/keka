@@ -13,7 +13,7 @@ HASHTAGS → FINAL ENGLISH QA → YOUTUBE UPLOAD → SCHEDULE / PUBLISH → ANAL
 You enter a topic (for example *"Why do astronauts grow taller in space?"*) or let the AI choose one, then click **GENERATE SHORT**. The system then:
 
 1. Researches the topic with live web search and classifies each claim as established fact, uncertain, speculation or opinion.
-2. Writes an English script built for Shorts: hook, curiosity, information, escalation, payoff.
+2. Writes an English one-fact script built for Shorts: the fact in the first sentence (max 12 words), a surprising detail, 2-3 sentences on why, and a closing question for viewers (60-90 words).
 3. Validates the script: English, length, pacing, repetition, facts, policy, hook and conclusion. It revises automatically when a check fails.
 4. Generates an English voiceover with ElevenLabs.
 5. Plans scenes from the real word timings of the voiceover and finds licensed Pexels footage for each scene.

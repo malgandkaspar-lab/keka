@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { countSpokenWords, estimateSpeechDurationSec, isWithinDuration, targetWordCount } from "@/services/scripts/duration";
-import { draftFromManualText, draftScript, fullText, programmaticChecks, reviewIssues, type ScriptContext, type ScriptDraft } from "@/services/scripts/script-service";
+import { draftFromManualText, draftScript, fullText, programmaticChecks, reviewIssues, type ScriptContext, type ScriptDraft, type ScriptReview } from "@/services/scripts/script-service";
 import { ASTRONAUT_SCRIPT, FakeAIProvider } from "../helpers/fakes";
 import { impliedWordsPerMinute } from "@/services/tts/speech-rate";
 
-const ctx = { targetDurationSec: 30, wordsPerMinute: 165, tolerancePct: 0.12, recentHooks: [] };
+const ctx = { targetDurationSec: 30, wordsPerMinute: 165, tolerancePct: 0.12, recentHooks: [] as string[] };
 
 describe("speech duration", () => {
   it("counts numbers as their spoken length", () => {
@@ -30,65 +30,82 @@ describe("speech duration", () => {
 });
 
 describe("script quality control (programmatic)", () => {
-  it("passes a well-formed English Shorts script", () => {
+  const withSections = (sections: ScriptDraft["sections"]): ScriptDraft => ({ ...ASTRONAUT_SCRIPT, sections });
+  const [hook, detail, why, question] = ASTRONAUT_SCRIPT.sections as unknown as ScriptDraft["sections"];
+  const checksOf = (draft: ScriptDraft, extra: Partial<typeof ctx> = {}) => new Set(programmaticChecks(draft, { ...ctx, ...extra }).issues.filter((i) => i.severity === "error").map((i) => i.check));
+
+  it("passes a well-formed one-fact script (fact first, detail, why, closing question, 60-90 words)", () => {
     const result = programmaticChecks(ASTRONAUT_SCRIPT, ctx);
     expect(result.issues.filter((i) => i.severity === "error")).toEqual([]);
     expect(result.passed).toBe(true);
     expect(result.metrics.hookWords).toBeLessThanOrEqual(12);
+    expect(result.metrics.wordCount).toBeGreaterThanOrEqual(60);
+    expect(result.metrics.wordCount).toBeLessThanOrEqual(90);
   });
 
-  it("rejects a 60-second script that would take 90 seconds to speak", () => {
-    const long: ScriptDraft = {
-      ...ASTRONAUT_SCRIPT,
-      sections: [
-        ASTRONAUT_SCRIPT.sections[0]!,
-        { type: "INFORMATION", text: Array.from({ length: 20 }, (_, i) => `Fact number ${i} is about the spine and how gravity changes it over time.`).join(" ") },
-        ASTRONAUT_SCRIPT.sections[4]!,
-      ],
-    };
-    const result = programmaticChecks(long, { ...ctx, targetDurationSec: 60 });
-    expect(result.passed).toBe(false);
-    expect(result.issues.some((i) => i.check === "duration")).toBe(true);
+  it("enforces 60-90 words", () => {
+    const long = withSections([hook!, detail!, { type: "INFORMATION", text: Array.from({ length: 8 }, () => "Gravity pulls the discs of your spine together all day long.").join(" ") }, question!]);
+    expect(checksOf(long)).toContain("duration");
+    expect(checksOf(withSections([hook!, question!]))).toContain("duration");
   });
 
-  it("rejects non-English text, stage directions and missing payoffs", () => {
+  it("requires the fact itself in a short first sentence - no intro, no question", () => {
+    expect(checksOf(withSections([{ type: "HOOK", text: "Did you know astronauts come home taller?" }, detail!, why!, question!]))).toContain("hook");
+    expect(checksOf(withSections([{ type: "HOOK", text: "Here's a fun fact: astronauts come home taller." }, detail!, why!, question!]))).toContain("hook");
+    expect(checksOf(withSections([{ type: "HOOK", text: "Nowadays astronauts come home taller." }, detail!, why!, question!]))).toContain("hook");
+    expect(
+      checksOf(withSections([{ type: "HOOK", text: "Astronauts who spend many months on the space station come home up to two inches taller." }, detail!, why!, question!])),
+    ).toContain("hook");
+  });
+
+  it("rejects lists of facts and a missing closing question or explanation", () => {
+    expect(checksOf(withSections([hook!, { type: "CURIOSITY", text: "Here are five facts about the spine you never knew." }, why!, question!]))).toContain("single_fact");
+    expect(checksOf(withSections([hook!, detail!, why!, { type: "CTA", text: "Follow for more space facts." }]))).toContain("conclusion");
+    expect(checksOf(withSections([hook!, detail!, question!]))).toContain("structure");
+  });
+
+  it("rejects non-English text and stage directions", () => {
     const bad: ScriptDraft = {
       hookStyle: "question",
       sections: [
-        { type: "HOOK", text: "[dramatic music] Warum werden Astronauten im Weltraum größer?" },
+        { type: "HOOK", text: "[dramatic music] Astronauten werden im Weltraum größer." },
         { type: "INFORMATION", text: "Die Schwerkraft drückt die Bandscheiben zusammen, und im All fehlt dieser Druck völlig." },
       ],
       factsUsed: [],
     };
-    const result = programmaticChecks(bad, ctx);
-    const checks = new Set(result.issues.map((i) => i.check));
+    const checks = checksOf(bad);
     expect(checks.has("english")).toBe(true);
     expect(checks.has("formatting")).toBe(true);
     expect(checks.has("conclusion")).toBe(true);
   });
 
   it("rejects repeated hooks and internal repetition", () => {
-    const result = programmaticChecks(ASTRONAUT_SCRIPT, { ...ctx, recentHooks: ["Why do astronauts come home taller?"] });
-    expect(result.issues.some((i) => i.check === "hook")).toBe(true);
-    const repetitive: ScriptDraft = {
-      ...ASTRONAUT_SCRIPT,
-      sections: ASTRONAUT_SCRIPT.sections.map((s) => ({ ...s, text: "gravity squeezes the spine every day. gravity squeezes the spine every day." })),
-    };
+    expect(checksOf(ASTRONAUT_SCRIPT, { recentHooks: ["Astronauts come home two inches taller."] })).toContain("hook");
+    const repetitive = withSections(ASTRONAUT_SCRIPT.sections.map((s) => ({ ...s, text: "gravity squeezes the spine every day. gravity squeezes the spine every day." })));
     expect(programmaticChecks(repetitive, ctx).issues.some((i) => i.check === "repetition")).toBe(true);
   });
 
-  it("turns AI review findings into blocking issues", () => {
-    const issues = reviewIssues(
-      { grammarAndSpellingOk: true, factuallyConsistent: false, unsupportedClaims: ["Astronauts grow a foot"], inappropriateContent: false, misleadingHook: true, hookScore: 4, conclusionScore: 8, shortsSuitabilityScore: 8, issues: [] },
-      true,
-    );
-    expect(issues.filter((i) => i.severity === "error").map((i) => i.check)).toEqual(expect.arrayContaining(["facts", "hook"]));
+  it("accepts a somewhat shorter script only as a last resort", () => {
+    const shorter = withSections([hook!, detail!, { type: "INFORMATION", text: "On Earth, gravity squeezes the soft discs between your vertebrae all day long. In orbit, that pressure simply disappears for months." }, question!]);
+    const words = programmaticChecks(shorter, ctx).metrics.wordCount;
+    expect(words).toBeGreaterThanOrEqual(50);
+    expect(words).toBeLessThan(60);
+    expect(programmaticChecks(shorter, ctx).passed).toBe(false);
+    expect(programmaticChecks(shorter, { ...ctx, allowShorter: true }).passed).toBe(true);
+    expect(programmaticChecks(withSections([hook!, question!]), { ...ctx, allowShorter: true }).passed).toBe(false);
   });
 
-  it("treats a small local reviewer's taste scores as warnings, but never factual problems", () => {
-    const review = { grammarAndSpellingOk: true, factuallyConsistent: true, unsupportedClaims: ["Built over 2,000 years."], inappropriateContent: false, misleadingHook: true, hookScore: 3, conclusionScore: 8, shortsSuitabilityScore: 8, issues: [] };
-    expect(reviewIssues(review, true).filter((i) => i.severity === "error").map((i) => i.check)).toEqual(["facts", "hook", "hook"]);
-    expect(reviewIssues(review, true, true).filter((i) => i.severity === "error").map((i) => i.check)).toEqual(["facts"]);
+  const review: ScriptReview = { grammarAndSpellingOk: true, factuallyConsistent: true, unsupportedClaims: [], inappropriateContent: false, misleadingHook: false, singleFact: true, hookStatesFact: true, hookScore: 8, conclusionScore: 8, shortsSuitabilityScore: 8, issues: [] };
+
+  it("turns AI review findings into blocking issues", () => {
+    const issues = reviewIssues({ ...review, factuallyConsistent: false, unsupportedClaims: ["Astronauts grow a foot"], misleadingHook: true, hookScore: 4, singleFact: false }, true);
+    expect(issues.filter((i) => i.severity === "error").map((i) => i.check)).toEqual(expect.arrayContaining(["facts", "hook", "single_fact"]));
+  });
+
+  it("treats a small local reviewer's format and taste judgements as warnings, but never factual problems", () => {
+    const noisy = { ...review, unsupportedClaims: ["Built over 2,000 years."], misleadingHook: true, hookScore: 3, singleFact: false, hookStatesFact: false };
+    expect(reviewIssues(noisy, true).filter((i) => i.severity === "error").map((i) => i.check)).toEqual(["facts", "single_fact", "hook", "hook", "hook"]);
+    expect(reviewIssues(noisy, true, true).filter((i) => i.severity === "error").map((i) => i.check)).toEqual(["facts"]);
   });
 
   it("splits manual text into hook, body and payoff", () => {
@@ -123,10 +140,10 @@ describe("script length fitting", () => {
     recentHooks: [],
   };
   const tooShort: ScriptDraft = {
-    hookStyle: "question",
+    hookStyle: "unexpected_fact",
     sections: [
-      { type: "HOOK", text: "Why do astronauts come home taller?" },
-      { type: "PAYOFF", text: "Gravity squeezes the spine." },
+      { type: "HOOK", text: "Astronauts come home taller." },
+      { type: "CTA", text: "Would you want that?" },
     ],
     factsUsed: [],
   };
@@ -155,12 +172,14 @@ describe("script length fitting", () => {
     expect(good.calls["script.fit"]).toBeUndefined();
   });
 
-  it("asks for a per-section sentence plan", async () => {
+  it("asks for the one-fact format with a per-section sentence plan", async () => {
     const ai = new FakeAIProvider();
     let prompt = "";
     ai.overrides["script.generate"] = (request) => ((prompt = request.prompt), ASTRONAUT_SCRIPT);
     await draftScript(ai, scriptCtx);
-    expect(prompt).toMatch(/INFORMATION: \d+ sentences/);
+    expect(prompt).toMatch(/ONE fact for the whole video/);
+    expect(prompt).toMatch(/60-90 words/);
+    expect(prompt).toMatch(/INFORMATION: [23] sentences/);
   });
 });
 
@@ -178,53 +197,31 @@ describe("script drafting with a small local model", () => {
     recentHooks: [],
   };
   type Props = Record<string, { minItems?: number }>;
-  const slots = (request: { schema: z.ZodType }) => {
-    const props = (z.toJSONSchema(request.schema) as { properties: Props }).properties;
-    return (key: string) => props[key]!.minItems!;
-  };
-  const fill = (count: number, sentence: string) => Array.from({ length: count }, (_, i) => `${sentence} number ${i + 1}.`);
-  const answer = (request: { schema: z.ZodType }, sentence: string) => {
-    const n = slots(request);
-    return {
-      hookStyle: "number",
-      hook: "The Great Wall is not one wall.",
-      curiosity: fill(n("curiosity"), sentence),
-      information: fill(n("information"), sentence),
-      escalation: fill(n("escalation"), sentence),
-      payoff: fill(n("payoff"), sentence),
-      cta: "Follow for more history.",
-      factsUsed: [],
-    };
-  };
+  const slots = (request: { schema: z.ZodType }) => (z.toJSONSchema(request.schema) as { properties: Props }).properties.why!.minItems!;
+  const answer = (request: { schema: z.ZodType }, why: string) => ({
+    hookStyle: "unexpected_fact",
+    hook: "The Great Wall is not one single wall.",
+    detail: "It is thousands of separate walls built over many centuries.",
+    why: why.split("|").slice(0, slots(request)),
+    question: "Would you walk the whole thing?",
+    factsUsed: [],
+  });
 
-  it("asks for exact sentence counts and re-plans when the sentences come out short", async () => {
+  it("asks for an exact number of 'why' sentences and re-plans when they come out short", async () => {
     const ai = Object.assign(new FakeAIProvider(), { prefersSimpleOutput: true });
     const counts: number[] = [];
-    ai.overrides["script.generate"] = (request) => (counts.push(slots(request)("information")), answer(request, "Ming soldiers guarded the wall"));
-    ai.overrides["script.fit"] = (request) => (counts.push(slots(request)("information")), answer(request, "Ming soldiers guarded the wall"));
+    ai.overrides["script.generate"] = (request) => (counts.push(slots(request)), answer(request, "Dynasties built walls.|Raiders came from the north.|Some parts are dirt."));
+    ai.overrides["script.fit"] = (request) => (
+      counts.push(slots(request)),
+      answer(
+        request,
+        "Different Chinese dynasties kept building new walls to protect their northern borders.|Nomadic horse riders could raid farms quickly, so every ruler wanted a barrier.|Later builders connected some sections, but many older walls were simply abandoned.",
+      )
+    );
     const { draft } = await draftScript(ai, scriptCtx);
     expect(ai.calls["script.fit"]).toBeGreaterThanOrEqual(1);
-    expect(counts[1]).toBeGreaterThan(counts[0]!);
-    expect(draft.sections.map((s) => s.type)).toEqual(["HOOK", "CURIOSITY", "INFORMATION", "ESCALATION", "PAYOFF", "CTA"]);
-    const duration = estimateSpeechDurationSec(fullText(draft), scriptCtx.wordsPerMinute);
-    expect(Math.abs(duration - 30)).toBeLessThan(30 * 0.12);
-  });
-
-  it("accepts a somewhat shorter script only as a last resort", () => {
-    const shortDraft: ScriptDraft = {
-      ...ASTRONAUT_SCRIPT,
-      sections: ASTRONAUT_SCRIPT.sections.filter((s) => s.type !== "ESCALATION"),
-    };
-    const ctx60 = { ...ctx, targetDurationSec: 30, wordsPerMinute: 150 };
-    const duration = estimateSpeechDurationSec(fullText(shortDraft), 150);
-    expect(duration).toBeGreaterThan(18);
-    expect(duration).toBeLessThan(26);
-    expect(programmaticChecks(shortDraft, ctx60).passed).toBe(false);
-    expect(programmaticChecks(shortDraft, { ...ctx60, allowShorter: true }).passed).toBe(true);
-    expect(programmaticChecks(tooShortDraft(), { ...ctx60, allowShorter: true }).passed).toBe(false);
+    expect(counts.every((n) => n >= 2 && n <= 3)).toBe(true);
+    expect(draft.sections.map((s) => s.type)).toEqual(["HOOK", "CURIOSITY", "INFORMATION", "CTA"]);
+    expect(programmaticChecks(draft, scriptCtx).issues.filter((i) => i.severity === "error")).toEqual([]);
   });
 });
-
-function tooShortDraft(): ScriptDraft {
-  return { hookStyle: "question", sections: [{ type: "HOOK", text: "Why?" }, { type: "PAYOFF", text: "Gravity squeezes the spine." }], factsUsed: [] };
-}

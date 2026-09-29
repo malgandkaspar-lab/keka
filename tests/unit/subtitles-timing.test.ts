@@ -3,7 +3,9 @@ import { SUBTITLE_STYLE_PRESETS } from "@/config/templates";
 import { alignScriptToTranscript, buildCues, cuesToSrt, layoutLines } from "@/services/subtitles/cues";
 import { assColor, assTime, escapeAssText, renderAss } from "@/services/subtitles/ass";
 import { charactersToWords, estimateWordTimings, mapSegmentsToTimeline, wordErrorRate } from "@/services/tts/alignment";
-import { segmentNarration } from "@/services/footage/scene-planner";
+import { SCENE_COUNT, segmentNarration } from "@/services/footage/scene-planner";
+import { ASTRONAUT_SCRIPT } from "../helpers/fakes";
+import { fullText } from "@/services/scripts/script-service";
 
 const words = "You probably did not know this. Astronauts actually grow taller in space, up to two inches!"
   .split(" ")
@@ -60,6 +62,29 @@ describe("scene segmentation", () => {
     for (let i = 1; i < segments.length; i++) expect(segments[i]!.start).toBe(segments[i - 1]!.end);
     expect(segments.map((s) => s.text).join(" ")).toBe(words.map((w) => w.text).join(" "));
     for (const s of segments.slice(0, -1)) expect(s.end - s.start).toBeLessThanOrEqual(3.5);
+  });
+});
+
+describe("scene count", () => {
+  const narration = estimateWordTimings(fullText(ASTRONAUT_SCRIPT), 28);
+  const covers = (segments: { text: string; start: number; end: number }[]) => {
+    expect(segments[0]!.start).toBe(0);
+    for (let i = 1; i < segments.length; i++) expect(segments[i]!.start).toBe(segments[i - 1]!.end);
+    expect(segments.map((s) => s.text).join(" ")).toBe(narration.map((w) => w.text).join(" "));
+  };
+
+  it("uses 5-7 scenes for a Short, whatever the template's shot length", () => {
+    const fast = segmentNarration(narration, 28, { targetShotSec: 2.2, minShotSec: 1.2, maxShotSec: 3.5 }, SCENE_COUNT);
+    const slow = segmentNarration(narration, 28, { targetShotSec: 8, minShotSec: 6, maxShotSec: 10 }, SCENE_COUNT);
+    for (const segments of [fast, slow]) {
+      expect(segments.length).toBeGreaterThanOrEqual(5);
+      expect(segments.length).toBeLessThanOrEqual(7);
+      covers(segments);
+    }
+  });
+
+  it("keeps the template's shot lengths without a scene count", () => {
+    expect(segmentNarration(narration, 28, { targetShotSec: 2.2, minShotSec: 1.2, maxShotSec: 3.5 }).length).toBeGreaterThan(7);
   });
 });
 

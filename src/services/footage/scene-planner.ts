@@ -25,13 +25,24 @@ export interface NarrationSegment {
 
 const TAIL_SEC = 0.6;
 
+/** The one-fact Shorts format uses 5-7 scenes per video. */
+export const SCENE_COUNT = { min: 5, max: 7 } as const;
+
 export function segmentNarration(
   words: WordTiming[],
   audioDurationSec: number,
-  style: Pick<VideoStyle, "targetShotSec" | "minShotSec" | "maxShotSec">,
+  baseStyle: Pick<VideoStyle, "targetShotSec" | "minShotSec" | "maxShotSec">,
+  sceneCount?: { min: number; max: number },
 ): NarrationSegment[] {
   if (words.length === 0) return [];
   const totalEnd = audioDurationSec + TAIL_SEC;
+  let style = baseStyle;
+  if (sceneCount) {
+    // Stretch the template's shot lengths so the narration falls into the wanted number of scenes.
+    const shots = Math.min(sceneCount.max, Math.max(sceneCount.min, Math.round(totalEnd / baseStyle.targetShotSec)));
+    const target = totalEnd / shots;
+    style = { targetShotSec: target, minShotSec: Math.min(baseStyle.minShotSec, target * 0.6), maxShotSec: target * 1.5 };
+  }
   const groups: WordTiming[][] = [];
   let current: WordTiming[] = [];
   let groupStart = 0;
@@ -63,6 +74,7 @@ export function segmentNarration(
       groups.splice(-2, 2, [...groups.at(-2)!, ...last]);
     }
   }
+  if (sceneCount) fitGroupCount(groups, sceneCount, totalEnd);
 
   return groups.map((group, index) => {
     const start = index === 0 ? 0 : group[0]!.start;
@@ -70,6 +82,36 @@ export function segmentNarration(
     const end = nextGroup ? nextGroup[0]!.start : totalEnd;
     return { index, text: group.map((w) => w.text).join(" "), start: Number(start.toFixed(3)), end: Number(end.toFixed(3)) };
   });
+}
+
+/** Merges the shortest neighbours / splits the longest group until the count is in range. */
+function fitGroupCount(groups: WordTiming[][], count: { min: number; max: number }, totalEnd: number): void {
+  const span = (g: WordTiming[], i: number) => (groups[i + 1]?.[0]?.start ?? totalEnd) - g[0]!.start;
+  while (groups.length > count.max) {
+    let best = 0;
+    for (let i = 1; i < groups.length - 1; i++) if (span(groups[i]!, i) + span(groups[i + 1]!, i + 1) < span(groups[best]!, best) + span(groups[best + 1]!, best + 1)) best = i;
+    groups.splice(best, 2, [...groups[best]!, ...groups[best + 1]!]);
+  }
+  while (groups.length < count.min) {
+    let longest = -1;
+    groups.forEach((g, i) => {
+      if (g.length >= 2 && (longest < 0 || span(g, i) > span(groups[longest]!, longest))) longest = i;
+    });
+    if (longest < 0) break;
+    const group = groups[longest]!;
+    const middle = (group[0]!.start + (groups[longest + 1]?.[0]?.start ?? totalEnd)) / 2;
+    // Split after the word closest to the middle, preferring punctuation.
+    let cut = 1;
+    let bestScore = Infinity;
+    for (let i = 1; i < group.length; i++) {
+      const score = Math.abs(group[i]!.start - middle) - (/[.!?;:,—–]$/.test(group[i - 1]!.text) ? 0.8 : 0);
+      if (score < bestScore) {
+        bestScore = score;
+        cut = i;
+      }
+    }
+    groups.splice(longest, 1, group.slice(0, cut), group.slice(cut));
+  }
 }
 
 export const TRANSITIONS = ["cut", "fade", "slideleft", "slideup", "smoothleft", "circleopen", "dissolve"] as const;
@@ -80,7 +122,7 @@ export const visualPlanSchema = z.object({
   scenes: z.array(
     z.object({
       index: z.number().int(),
-      visualDescription: z.string(),
+      visualDescription: z.string().describe("Detailed English description of the vertical 9:16 shot: subject, setting, camera, lighting, mood"),
       keywords: z.array(z.string()).describe("2-4 concrete English stock footage search queries, most specific first"),
       fallbackKeywords: z.array(z.string()).describe("2-3 broader English search queries"),
       transition: z.enum(TRANSITIONS),
@@ -96,11 +138,12 @@ export interface PlannedScene extends NarrationSegment {
   transition: string;
 }
 
-const SYSTEM = `You are a video editor planning B-roll for a vertical YouTube Short.
-For every narration segment choose visuals that literally illustrate what is being said and that
-exist as generic stock footage (Pexels). Search queries must be short (1-4 words), concrete and
-visual (objects, places, actions) - never abstract ideas, brand names, celebrities or text.
-Avoid choosing the same visual for consecutive shots.
+const SYSTEM = `You are a video director planning the shots of a vertical (9:16) YouTube Short.
+For every narration segment, write a detailed English visual description of one shot that literally
+illustrates what is being said: the subject, the setting, the camera angle and movement, the lighting and
+the mood, composed for a vertical 9:16 frame. Then give stock footage search queries (Pexels) for that shot:
+short (1-4 words), concrete and visual (objects, places, actions) - never abstract ideas, brand names,
+celebrities or text. Avoid choosing the same visual for consecutive shots.
 ${ENGLISH_ONLY_PROMPT}`;
 
 export async function planVisuals(opts: {

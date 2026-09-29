@@ -4,7 +4,7 @@ import { MissingCredentialError, ValidationError } from "@/lib/errors";
 import { getAIProvider } from "@/services/ai";
 import { getVideoProvider } from "@/services/footage";
 import { searchSceneFootage, selectFootageForVideo } from "@/services/footage/footage-service";
-import { planVisuals, segmentNarration, wordsOrEstimate } from "@/services/footage/scene-planner";
+import { planVisuals, SCENE_COUNT, segmentNarration, wordsOrEstimate } from "@/services/footage/scene-planner";
 import { selectMusic } from "@/services/music/music-service";
 import { currentScriptVersion } from "@/services/scripts/script-service";
 import { generateSubtitles } from "@/services/subtitles/subtitle-service";
@@ -58,7 +58,7 @@ export const planVisualsHandler: StepHandler = async (ctx) => {
   const voiceover = await currentVoiceover(video.id);
   const version = await currentScriptVersion(video.id);
   const words = wordsOrEstimate(voiceoverWords(voiceover), version.fullText, voiceover.durationSec);
-  const segments = segmentNarration(words, voiceover.durationSec, template.video);
+  const segments = segmentNarration(words, voiceover.durationSec, template.video, SCENE_COUNT);
   if (segments.length === 0) throw new ValidationError("Narration could not be split into scenes");
   const ai = getAIProvider(settings);
   const plan = await planVisuals({
